@@ -94,7 +94,7 @@ ephemeridesService = new SwissEphemeridesService(rootPathToEph: "[PATH_TO_SWISSE
 eph = ephemeridesService.CreateContext();
 
 // for JPL files
-ephemeridesService = new SwissEphemeridesService(rootPathToEph: "[PATH_TO_SWISSEPH_ROOT_FOLDER]", EphType.Jpl);
+ephemeridesService = new SwissEphemeridesService(rootPathToEph: "[PATH_TO_JPL_ROOT_FOLDER]", EphType.Jpl);
 eph = ephemeridesService.CreateContext();
 ```
 
