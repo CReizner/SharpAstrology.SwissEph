@@ -10,13 +10,11 @@ namespace SharpAstrology.Ephemerides;
 public sealed class SwissEphemerides : IEphemerides
 {
     private SwissEph _eph;
-    private EphemeridesOptions _options;
     private int _calculationFlag;
 
-    public SwissEphemerides(SwissEph eph, EphType ephType, EphemeridesOptions options)
+    internal SwissEphemerides(SwissEph eph, EphType ephType)
     {
         _eph = eph;
-        _options = options;
         _calculationFlag = ephType switch
         {
             EphType.Moshier => SwissEph.SEFLG_MOSEPH,
@@ -25,16 +23,13 @@ public sealed class SwissEphemerides : IEphemerides
             _ => throw new ArgumentException($"EphType unknown: {ephType}.")
         };
         _calculationFlag |= SwissEph.SEFLG_SPEED;
-        if (options.SiderealMode)
-        {
-            _calculationFlag |= SwissEph.SEFLG_SIDEREAL;
-        }
     }
     
     public double GetAyanamsa(DateTime pointInTime)
     {
         var error = string.Empty;
-        if (_eph.swe_get_ayanamsa_ex_ut(pointInTime.ToJulianDate(), _calculationFlag, out var ayanamsa, ref error) < 0)
+        var calcFlag = _calculationFlag | SwissEph.SEFLG_SIDEREAL;
+        if (_eph.swe_get_ayanamsa_ex_ut(pointInTime.ToJulianDate(), calcFlag, out var ayanamsa, ref error) < 0)
         {
             throw new Exception($"Error occured while calculation ayanamsa: {error}");
         }
@@ -42,16 +37,22 @@ public sealed class SwissEphemerides : IEphemerides
         return ayanamsa;
     }
     
-    public PlanetPosition PlanetsPosition(Planets planet, DateTime pointInTime)
+    public PlanetPosition PlanetsPosition(Planets planet, DateTime pointInTime, EphCalculationMode mode = EphCalculationMode.Tropic)
     {
+        if (pointInTime.Kind != DateTimeKind.Utc)
+        {
+            throw new ArgumentException("Provided DateTime was not of kind UTC.");
+        }
         string error = string.Empty;
         var result = new double[6];
         var julianDay = pointInTime.ToJulianDate();
         var planetFlag = MapPlanet(planet);
-        
+        var calcFlag = mode == EphCalculationMode.Sidereal
+            ? _calculationFlag | SwissEph.SEFLG_SIDEREAL
+            : _calculationFlag;
         if (planet != Planets.Earth && planet != Planets.SouthNode) 
         { 
-            if (_eph.swe_calc_ut(julianDay, planetFlag, _calculationFlag, result, ref error) < 0) 
+            if (_eph.swe_calc_ut(julianDay, planetFlag, calcFlag, result, ref error) < 0) 
             { 
                 throw new Exception($"Error occured while calculation object: {error}");
             }
@@ -63,7 +64,7 @@ public sealed class SwissEphemerides : IEphemerides
                 14 => 0, //Earth to Sun
                 -2 => 11 //South node to north node
             };
-            if (_eph.swe_calc_ut(julianDay, planetFlag, _calculationFlag, result, ref error) < 0) {
+            if (_eph.swe_calc_ut(julianDay, planetFlag, calcFlag, result, ref error) < 0) {
                 throw new Exception($"Error occured while calculation object: {error}");
             }
                 
@@ -82,16 +83,21 @@ public sealed class SwissEphemerides : IEphemerides
         };
     }
     
-    public HousePosition HouseCuspPositions(DateTime pointInTime, double latitude, double longitude)
+    public HousePosition HouseCuspPositions(DateTime pointInTime, double latitude, double longitude, 
+        HouseSystems houseSystem = HouseSystems.Placidus, EphCalculationMode mode = EphCalculationMode.Tropic)
     {
+        if (pointInTime.Kind != DateTimeKind.Utc)
+        {
+            throw new ArgumentException("Provided DateTime was not of kind UTC.");
+        }
         var hcusps = new CPointer<double>(new double[13]);
         var ascmc = new CPointer<double>(new double[10]);
-        var flag = _options.SiderealMode ? SwissEph.SEFLG_SIDEREAL : 0;
+        var flag = mode == EphCalculationMode.Sidereal ? SwissEph.SEFLG_SIDEREAL : 0;
         if (_eph.swe_houses_ex(pointInTime.ToJulianDate(), (int)flag, latitude, longitude, 
-                (char) _options.HouseSystem, hcusps, ascmc) < 0)
+                MapHouseSystems(houseSystem), hcusps, ascmc) < 0)
         {
             throw new Exception(
-                $"Error occured while calculating houses: {pointInTime.ToJulianDate()} {latitude} {longitude} {_options.HouseSystem}");
+                $"Error occured while calculating houses: {pointInTime.ToJulianDate()} {latitude} {longitude} {houseSystem}");
         }
 
         return new HousePosition()

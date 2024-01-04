@@ -17,9 +17,8 @@ public sealed class SwissEphemeridesService
         _ephType = ephType;
     }
     
-    public IEphemerides CreateContext(EphemeridesOptions? options = null)
+    public IEphemerides CreateContext(Ayanamsas ayanamsa = Ayanamsas.FagenBradley)
     {
-        options ??= new EphemeridesOptions();
         var eph = new SwissEph();
         switch (_ephType)
         {
@@ -35,7 +34,7 @@ public sealed class SwissEphemeridesService
                 throw new ArgumentOutOfRangeException();
         }
 
-        eph.swe_set_sid_mode((int)MapAyanamsas(options.Ayanamsa), 0, 0);
+        eph.swe_set_sid_mode((int)MapAyanamsas(ayanamsa), 0, 0);
         
         if (_ephType is EphType.Swiss or EphType.Jpl)
         {
@@ -46,7 +45,7 @@ public sealed class SwissEphemeridesService
             };
         }
 
-        return new SwissEphemerides(eph, _ephType, options);
+        return new SwissEphemerides(eph, _ephType);
     }
     
     SwissEphAyanamsas MapAyanamsas(Ayanamsas ayanamasa) => ayanamasa switch
