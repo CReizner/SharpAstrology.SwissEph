@@ -1,7 +1,7 @@
-# SharpAstrology.SwissEph - Ephemerides for [SharpAstrology](https://github.com/CReizner/SharpAstrology)
+# SharpAstrology.SwissEph - Ephemerides for SharpAstrology
 
 ## About
-This package provides an implementation of the IEphemerides interface from [SharpAstrology.Base](https://github.com/CReizner/SharpAstrology/tree/main/SharpAstrology.Base). It uses the [SwissEphNet](https://github.com/ygrenier/SwissEphNet) project, which provides bindings for the C-library [swisseph](https://github.com/aloistr/swisseph).
+This package provides an implementation of the IEphemerides interface from [SharpAstrology.Base](https://github.com/CReizner/SharpAstrology.Base). It uses the [SwissEphNet](https://github.com/ygrenier/SwissEphNet) project, which provides bindings for the C-library [swisseph](https://github.com/aloistr/swisseph).
 
 ## Simple usage
 ```C#
