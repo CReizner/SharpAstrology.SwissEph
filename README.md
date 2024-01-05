@@ -3,6 +3,11 @@
 ## About
 This package provides an implementation of the IEphemerides interface from [SharpAstrology.Base](https://github.com/CReizner/SharpAstrology.Base). It uses the [SwissEphNet](https://github.com/ygrenier/SwissEphNet) project, which provides bindings for the C-library [swisseph](https://github.com/aloistr/swisseph).
 
+## Install
+```shell
+dotnet add package SharpAstrology.SwissEph
+```
+
 ## Simple usage
 ```C#
 using System.Text.Json;
