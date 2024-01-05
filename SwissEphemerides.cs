@@ -25,11 +25,10 @@ public sealed class SwissEphemerides : IEphemerides
         _calculationFlag |= SwissEph.SEFLG_SPEED;
     }
     
-    public double GetAyanamsa(DateTime pointInTime)
+    public double Ayanamsa(DateTime pointInTime)
     {
         var error = string.Empty;
-        var calcFlag = _calculationFlag | SwissEph.SEFLG_SIDEREAL;
-        if (_eph.swe_get_ayanamsa_ex_ut(pointInTime.ToJulianDate(), calcFlag, out var ayanamsa, ref error) < 0)
+        if (_eph.swe_get_ayanamsa_ex_ut(pointInTime.ToJulianDate(), _calculationFlag | SwissEph.SEFLG_SIDEREAL, out var ayanamsa, ref error) < 0)
         {
             throw new Exception($"Error occured while calculation ayanamsa: {error}");
         }
@@ -62,7 +61,8 @@ public sealed class SwissEphemerides : IEphemerides
             planetFlag = planetFlag switch 
             {
                 14 => 0, //Earth to Sun
-                -2 => 11 //South node to north node
+                -2 => 11, //South node to north node
+                _ => throw new ArgumentOutOfRangeException(nameof(planetFlag),"Unknown planet flag.")
             };
             if (_eph.swe_calc_ut(julianDay, planetFlag, calcFlag, result, ref error) < 0) {
                 throw new Exception($"Error occured while calculation object: {error}");
@@ -111,9 +111,9 @@ public sealed class SwissEphemerides : IEphemerides
             {
                 [Cross.Asc] = ascmc[0],
                 [Cross.Mc] = ascmc[1],
-                [Cross.Vertex] = ascmc[3],
                 [Cross.Ic] = (ascmc[1] + 180) % 360,
-                [Cross.Dc] = (ascmc[0] + 180) % 360
+                [Cross.Dc] = (ascmc[0] + 180) % 360,
+                [Cross.Vertex] = ascmc[3]
             }
         };
     }
@@ -144,7 +144,8 @@ public sealed class SwissEphemerides : IEphemerides
         HouseSystems.Regiomontanus => 'R',
         HouseSystems.Sripati => 'S',
         HouseSystems.VehlowEqual => 'V',
-        HouseSystems.WholeSign => 'W'
+        HouseSystems.WholeSign => 'W',
+        _ => throw new ArgumentOutOfRangeException(nameof(houseSystem), houseSystem, "House system could not be mapped to swiss eph constant.")
     };
 
     private int MapPlanet(Planets planet) => planet switch
