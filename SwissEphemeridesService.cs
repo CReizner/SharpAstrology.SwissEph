@@ -36,14 +36,14 @@ public sealed class SwissEphemeridesService
 
         eph.swe_set_sid_mode((int)MapAyanamsas(ayanamsa), 0, 0);
         
-        if (_ephType is EphType.Swiss or EphType.Jpl)
-        {
-            eph.OnLoadFile += (s, e) => {
-                e.File = File.OpenRead(e.FileName
-                    .Replace('\\', Path.DirectorySeparatorChar)
-                    .Replace("[ephe]", _rootPathToEph));
-            };
-        }
+        // if (_ephType is EphType.Swiss or EphType.Jpl)
+        // {
+        //     eph.OnLoadFile += (s, e) => {
+        //         e.File = File.OpenRead(e.FileName
+        //             .Replace('\\', Path.DirectorySeparatorChar)
+        //             .Replace("[ephe]", _rootPathToEph));
+        //     };
+        // }
 
         return new SwissEphemerides(eph, _ephType);
     }
