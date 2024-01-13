@@ -9,7 +9,7 @@
     <PropertyGroup>
         <PackageId>SharpAstrology.SwissEph</PackageId>
         <PackageTags>Astrology</PackageTags>
-        <Version>0.2.0</Version>
+        <Version>0.2.1</Version>
         <Authors>Christian Reizner</Authors>
         <IsPackable>true</IsPackable>
         <PackageProjectUrl>https://github.com/CReizner/SharpAstrology.SwissEph</PackageProjectUrl>
