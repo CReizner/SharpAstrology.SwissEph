@@ -13,37 +13,37 @@ public sealed class SwissEphemeridesService
     
     public SwissEphemeridesService(string? rootPathToEph=null, EphType ephType=EphType.Swiss)
     {
-        _rootPathToEph = rootPathToEph ?? Path.Join(AppContext.BaseDirectory, "Data", "Ephe");
+        _rootPathToEph = rootPathToEph ?? Path.Join(AppContext.BaseDirectory, "ephe");
         _ephType = ephType;
     }
     
     public IEphemerides CreateContext(Ayanamsas ayanamsa = Ayanamsas.FagenBradley)
     {
         var eph = new SwissEph();
-        switch (_ephType)
-        {
-            case EphType.Swiss:
-                eph.swe_set_ephe_path(_rootPathToEph);
-                break;
-            case EphType.Jpl:
-                eph.swe_set_jpl_file(_rootPathToEph);
-                break;
-            case EphType.Moshier:
-                break;
-            default:
-                throw new ArgumentOutOfRangeException();
-        }
+        // switch (_ephType)
+        // {
+        //     case EphType.Swiss:
+        //         eph.swe_set_ephe_path(_rootPathToEph);
+        //         break;
+        //     case EphType.Jpl:
+        //         eph.swe_set_jpl_file(_rootPathToEph);
+        //         break;
+        //     case EphType.Moshier:
+        //         break;
+        //     default:
+        //         throw new ArgumentOutOfRangeException();
+        // }
 
         eph.swe_set_sid_mode((int)MapAyanamsas(ayanamsa), 0, 0);
         
-        // if (_ephType is EphType.Swiss or EphType.Jpl)
-        // {
-        //     eph.OnLoadFile += (s, e) => {
-        //         e.File = File.OpenRead(e.FileName
-        //             .Replace('\\', Path.DirectorySeparatorChar)
-        //             .Replace("[ephe]", _rootPathToEph));
-        //     };
-        // }
+        if (_ephType is EphType.Swiss or EphType.Jpl)
+        {
+            eph.OnLoadFile += (s, e) => {
+                e.File = File.OpenRead(e.FileName
+                    .Replace('\\', Path.DirectorySeparatorChar)
+                    .Replace("[ephe]", _rootPathToEph));
+            };
+        }
 
         return new SwissEphemerides(eph, _ephType);
     }

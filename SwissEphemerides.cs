@@ -42,35 +42,63 @@ public sealed class SwissEphemerides : IEphemerides
         {
             throw new ArgumentException("Provided DateTime was not of kind UTC.");
         }
-        string error = string.Empty;
+        var error = string.Empty;
         var result = new double[6];
         var julianDay = pointInTime.ToJulianDate();
         var planetFlag = MapPlanet(planet);
         var calcFlag = mode == EphCalculationMode.Sidereal
             ? _calculationFlag | SwissEph.SEFLG_SIDEREAL
             : _calculationFlag;
-        if (planet != Planets.Earth && planet != Planets.SouthNode) 
-        { 
-            if (_eph.swe_calc_ut(julianDay, planetFlag, calcFlag, result, ref error) < 0) 
-            { 
-                throw new Exception($"Error occured while calculation object: {error}");
-            }
-        }
-        else 
-        { 
-            planetFlag = planetFlag switch 
+        
+        switch (planet)
+        {
+            case Planets.NorthNode:
             {
-                14 => 0, //Earth to Sun
-                -2 => 11, //South node to north node
-                _ => throw new ArgumentOutOfRangeException(nameof(planetFlag),"Unknown planet flag.")
-            };
-            if (_eph.swe_calc_ut(julianDay, planetFlag, calcFlag, result, ref error) < 0) {
-                throw new Exception($"Error occured while calculation object: {error}");
-            }
-                
-            result[0] = (result[0] + 180) % 360;
-            result[1] = -result[1];
+                if (_eph.swe_nod_aps_ut(julianDay, 1, calcFlag, SwissEph.SE_NODBIT_OSCU, result, new double[6], new double[6], new double[6], ref error) < 0)
+                {
+                    throw new Exception($"Error occured while calculation object: {error}");
+                }
+            }break;
+            case Planets.SouthNode:
+            {
+                if (_eph.swe_nod_aps_ut(julianDay, 1, calcFlag, SwissEph.SE_NODBIT_OSCU, result, new double[6], new double[6], new double[6], ref error) < 0)
+                {
+                    throw new Exception($"Error occured while calculation object: {error}");
+                }
+                result[0] = (result[0] + 180) % 360;
+                result[1] = -result[1]; 
+            }break;
+            default:
+            {
+                if (_eph.swe_calc_ut(julianDay, planetFlag, calcFlag, result, ref error) < 0) 
+                { 
+                    throw new Exception($"Error occured while calculation object: {error}");
+                }
+            }break;
         }
+        
+        // if (planet != Planets.Earth && planet != Planets.SouthNode) 
+        // { 
+        //     if (_eph.swe_calc_ut(julianDay, planetFlag, calcFlag, result, ref error) < 0) 
+        //     { 
+        //         throw new Exception($"Error occured while calculation object: {error}");
+        //     }
+        // }
+        // else 
+        // { 
+        //     planetFlag = planetFlag switch 
+        //     {
+        //         14 => 0, //Earth to Sun
+        //         -2 => 11, //South node to north node
+        //         _ => throw new ArgumentOutOfRangeException(nameof(planetFlag),"Unknown planet flag.")
+        //     };
+        //     if (_eph.swe_calc_ut(julianDay, planetFlag, calcFlag, result, ref error) < 0) {
+        //         throw new Exception($"Error occured while calculation object: {error}");
+        //     }
+        //         
+        //     result[0] = (result[0] + 180) % 360;
+        //     result[1] = -result[1]; 
+        // }
 
         return new PlanetPosition()
         {
@@ -164,7 +192,13 @@ public sealed class SwissEphemerides : IEphemerides
         Planets.Uranus => 7,
         Planets.Neptune => 8,
         Planets.Pluto => 9,
-        _ => throw new ArgumentException($"Mapping not provided for {planet} in SwissEphemerides.")
+        Planets.Pholus => 16,
+        Planets.Ceres => 17,
+        Planets.Pallas => 18,
+        Planets.Juno => 19,
+        Planets.Vesta => 20,
+        Planets.Lilith => SwissEph.SE_AST_OFFSET + 1181,
+        _ => throw new NotSupportedException($"Mapping not provided for {planet} in SwissEphemerides.")
     };
 
     
