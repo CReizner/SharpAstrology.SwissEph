@@ -21,6 +21,7 @@
     <RepositoryUrl>https://github.com/CReizner/SharpAstrology.SwissEph</RepositoryUrl>
     <PackageTags>Astrology;SwissEphemeris;Ephemeris;IEphemerides</PackageTags>
     <PackageLicenseFile>LICENSE.AGPL-3.0.txt</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -42,6 +43,7 @@
   <ItemGroup>
     <None Include="LICENSE.AGPL-3.0.txt" Pack="true" PackagePath="\" Condition="Exists('LICENSE.AGPL-3.0.txt')" />
     <None Include="LICENSE.SwissEph.txt" Pack="true" PackagePath="\" Condition="Exists('LICENSE.SwissEph.txt')" />
+    <None Include="README.md" Pack="true" PackagePath="\" Condition="Exists('README.md')" />
     <InternalsVisibleTo Include="SharpAstrology.SwissEphemerides.UnitTests" />
     <InternalsVisibleTo Include="SharpAstrology.SwissEphemerides.GoldenTests" />
     <InternalsVisibleTo Include="SharpAstrology.SwissEphemerides.IntegrationTests" />
