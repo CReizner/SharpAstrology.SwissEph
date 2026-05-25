@@ -1,36 +1,51 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <TargetFramework>net8.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-    </PropertyGroup>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
 
-    <PropertyGroup>
-        <PackageId>SharpAstrology.SwissEph</PackageId>
-        <PackageTags>Astrology</PackageTags>
-        <Version>0.3.0</Version>
-        <Authors>Christian Reizner</Authors>
-        <IsPackable>true</IsPackable>
-        <PackageProjectUrl>https://github.com/CReizner/SharpAstrology.SwissEph</PackageProjectUrl>
-        <RepositoryUrl>https://github.com/CReizner/SharpAstrology.SwissEph</RepositoryUrl>
-        <Description>
-            This package provides an implementation of the IEphemerides interface from SharpAstrology.Base. 
-            It uses the SwissEphNet project, which provides bindings for the C-library swisseph.
-            Be aware of the dual licence of swisseph.
-        </Description>
-        <PackageReadmeFile>README.md</PackageReadmeFile>
-        <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
-    </PropertyGroup>
+    <RootNamespace>SharpAstrology.SwissEphemerides</RootNamespace>
+    <AssemblyName>SharpAstrology.SwissEph</AssemblyName>
+    <PackageId>SharpAstrology.SwissEph</PackageId>
+    <Version>0.4.0</Version>
+    <Authors>Christian Reizner</Authors>
+    <Description>Swiss Ephemeris ported to idiomatic C# (.NET 10). Drop-in successor of SharpAstrology.SwissEph 0.3.0: same SwissEphemeridesService/IEphemerides surface, no native dependencies. Implements SharpAstrology.Base.IEphemerides.</Description>
+    <PackageProjectUrl>https://github.com/CReizner/SharpAstrology.SwissEph</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/CReizner/SharpAstrology.SwissEph</RepositoryUrl>
+    <PackageTags>Astrology;SwissEphemeris;Ephemeris;IEphemerides</PackageTags>
+    <PackageLicenseFile>LICENSE.AGPL-3.0.txt</PackageLicenseFile>
+  </PropertyGroup>
 
-    <ItemGroup>
-      <PackageReference Include="SharpAstrology.Base" Version="0.11.0" />
-      <PackageReference Include="SwissEphNet" Version="2.8.0.2" />
-    </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Numerics.Tensors" Version="10.0.7" />
+  </ItemGroup>
 
-    <ItemGroup>
-        <None Include="README.md" Pack="true" PackagePath="$(PackageReadmeFile)" CopyToOutputDirectory="Always"/>
-        <None Include="LICENSE.md" Pack="true" PackagePath="$(PackageLicenseFile)" CopyToOutputDirectory="Always"/>
-    </ItemGroup>
+  <PropertyGroup>
+    <SharpAstrologyBaseVersion>[0.12.0,)</SharpAstrologyBaseVersion>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('../SharpAstrology.Base/SharpAstrology.Base.csproj')">
+    <ProjectReference Include="../SharpAstrology.Base/SharpAstrology.Base.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="!Exists('../SharpAstrology.Base/SharpAstrology.Base.csproj')">
+    <PackageReference Include="SharpAstrology.Base" Version="$(SharpAstrologyBaseVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="LICENSE.AGPL-3.0.txt" Pack="true" PackagePath="\" Condition="Exists('LICENSE.AGPL-3.0.txt')" />
+    <None Include="LICENSE.SwissEph.txt" Pack="true" PackagePath="\" Condition="Exists('LICENSE.SwissEph.txt')" />
+    <InternalsVisibleTo Include="SharpAstrology.SwissEphemerides.UnitTests" />
+    <InternalsVisibleTo Include="SharpAstrology.SwissEphemerides.GoldenTests" />
+    <InternalsVisibleTo Include="SharpAstrology.SwissEphemerides.IntegrationTests" />
+    <InternalsVisibleTo Include="SharpAstrology.SwissEphemerides.Benchmarks" />
+  </ItemGroup>
 
 </Project>

@@ -1,5 +1,28 @@
-bin
-obj
-Data
-.idea
+## Build outputs
+bin/
+obj/
 
+## IDE
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Rider / VS caches
+*.lscache
+
+## Data files (not redistributable — see LICENSE.SwissEph.txt)
+ephe/
+*.se1
+*.eph
+sefstars.txt
+
+## OS junk
+.DS_Store
+Thumbs.db
+
+## NuGet
+*.nupkg
+*.snupkg
