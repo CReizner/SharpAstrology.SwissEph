@@ -14,10 +14,10 @@
     <RootNamespace>SharpAstrology.SwissEphemerides</RootNamespace>
     <AssemblyName>SharpAstrology.SwissEph</AssemblyName>
     <PackageId>SharpAstrology.SwissEph</PackageId>
-    <Version>0.4.1</Version>
+    <Version>0.4.2</Version>
     <Authors>Christian Reizner</Authors>
     <Description>Swiss Ephemeris ported to idiomatic C# (.NET 10). Drop-in successor of SharpAstrology.SwissEph 0.3.0: same SwissEphemeridesService/IEphemerides surface, no native dependencies. Implements SharpAstrology.Base.IEphemerides.</Description>
-    <PackageReleaseNotes>0.4.1: Planets.Earth now returns the astrological Earth (the apparent Sun's antipode) instead of the geocentric zero vector. Lunar node and apside longitudes now include nutation and refer to the true equinox of date, matching the C library's default output. Fixes missing Earth channels, wrong Earth fixing states and a wrong Perspective tone in Human-Design charts.</PackageReleaseNotes>
+    <PackageReleaseNotes>0.4.2: Fixes wrong positions for Chiron, Pholus, Ceres, Pallas, Juno and Vesta. Their heliocentric file records were returned without adding the barycentric Sun, shifting geocentric longitudes by up to ~0.11° (Ceres) and ~0.03° (Chiron). Asteroid positions now match the Swiss Ephemeris C library to sub-milliarcsecond level and are covered by golden tests.</PackageReleaseNotes>
     <PackageProjectUrl>https://github.com/CReizner/SharpAstrology.SwissEph</PackageProjectUrl>
     <RepositoryUrl>https://github.com/CReizner/SharpAstrology.SwissEph</RepositoryUrl>
     <PackageTags>Astrology;SwissEphemeris;Ephemeris;IEphemerides</PackageTags>

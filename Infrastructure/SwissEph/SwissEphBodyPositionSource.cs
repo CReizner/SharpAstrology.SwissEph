@@ -150,12 +150,16 @@ internal sealed class SwissEphBodyPositionSource : IBodyPositionSource, IDisposa
     /// Computes barycentric position of an inner / outer planet or major
     /// asteroid. Mirrors <c>sweplan()</c>'s "planet" branch (sweph.c:1940-1962):
     /// reads file content; if SEI_FLG_HELIO is set, adds barycentric Sun.
+    /// Asteroids (SEI index ≥ SEI_ANYBODY) are stored heliocentric without the
+    /// HELIO flag, so they always get the Sun added — mirrors the
+    /// <c>ipl >= SEI_ANYBODY</c> branch in <c>sweph()</c> (sweph.c:2335-2348).
     /// </summary>
     private BodyState ComputePlanetBarycentric(CelestialBody body, JulianDay jdEt, bool inSpeed)
     {
         var seiBody = SwissEphFileLocator.MapToSeiInternalIndex(body);
         var (filePos, fileVel, planet) = ReadFromFileWithRecord(body, seiBody, jdEt, inSpeed);
-        if ((planet.Flags & Se1FileFormat.FlagHelio) != 0)
+        var isAsteroid = seiBody >= Se1FileFormat.SeiAnyBody;
+        if ((planet.Flags & Se1FileFormat.FlagHelio) != 0 || isAsteroid)
         {
             // Convert heliocentric → barycentric by adding barycentric Sun.
             var (helEarth, helEarthV) = ReadFromFile(CelestialBody.Sun, Se1FileFormat.SeiSunBary, jdEt, inSpeed);
