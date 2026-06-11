@@ -48,6 +48,13 @@ namespace SharpAstrology.Ephemerides;
 /// strategy through the lower-level <see cref="EphemerisContext.Bodies"/>
 /// service.
 /// </para>
+/// <para>
+/// <b>Earth:</b> <see cref="Planets.Earth"/> resolves to the astrological
+/// Earth, i.e. the geometric antipode of the apparent Sun (longitude +
+/// 180°, latitude sign-flipped). It does <i>not</i> map to the geocentric
+/// <see cref="CelestialBody.Earth"/>, which is the zero vector by Swiss
+/// Ephemeris convention.
+/// </para>
 /// </remarks>
 public sealed class SwissEphemerides : IEphemerides
 {
@@ -110,7 +117,7 @@ public sealed class SwissEphemerides : IEphemerides
         {
             var (northBody, northFlags) = ResolveNodeRequest(mode);
             var north = ComputeBody(northBody, jdUt, northFlags);
-            return ToSouthNode(north, mode);
+            return ToAntipode(ToPlanetPosition(north, mode));
         }
 
         if (planet == Planets.NorthNode)
@@ -118,6 +125,16 @@ public sealed class SwissEphemerides : IEphemerides
             var (northBody, northFlags) = ResolveNodeRequest(mode);
             var state = ComputeBody(northBody, jdUt, northFlags);
             return ToPlanetPosition(state, mode);
+        }
+
+        // The astrological Earth is the antipode of the apparent Sun
+        // (longitude + 180°, latitude sign-flipped). The geocentric
+        // CelestialBody.Earth is the zero vector by Swiss Ephemeris
+        // convention and must never surface through this adapter.
+        if (planet == Planets.Earth)
+        {
+            var sun = ComputeBody(CelestialBody.Sun, jdUt, flags);
+            return ToAntipode(ToPlanetPosition(sun, mode));
         }
 
         var celestial = MapPlanet(planet);
@@ -217,8 +234,10 @@ public sealed class SwissEphemerides : IEphemerides
         Planets.Pluto => CelestialBody.Pluto,
         Planets.NorthNode => CelestialBody.TrueNode,
         // SouthNode is computed from TrueNode upstream — never reaches here.
+        // Earth is computed as the Sun's antipode upstream — never reaches
+        // here. Mapping it to CelestialBody.Earth would yield the geocentric
+        // zero vector (longitude 0) and break astrological consumers.
         Planets.Chiron => CelestialBody.Chiron,
-        Planets.Earth => CelestialBody.Earth,
         Planets.Pholus => CelestialBody.Pholus,
         Planets.Ceres => CelestialBody.Ceres,
         Planets.Pallas => CelestialBody.Pallas,
@@ -277,7 +296,10 @@ public sealed class SwissEphemerides : IEphemerides
     /// Geometric flag set required by the lunar-osculating-elements branch
     /// of <see cref="BodyService"/> (see
     /// <see cref="LunarOsculatingElements"/>): no aberration, no
-    /// gravitational deflection, no nutation, true position, no source hint.
+    /// gravitational deflection, true position, no source hint. Nutation
+    /// stays enabled so node longitudes refer to the true equinox of date,
+    /// matching the C library's default output (its node path ignores the
+    /// aberration / deflection / true-position bits anyway).
     /// Source selection is left to the context's <c>SourceRouter</c>.
     /// Sidereal projection is layered on top by the regular
     /// <c>BodyService</c> sidereal step.
@@ -295,7 +317,6 @@ public sealed class SwissEphemerides : IEphemerides
     private static EphemerisFlags NodeGeometryFlags(EphCalculationMode mode)
     {
         var flags = EphemerisFlags.Speed
-                  | EphemerisFlags.NoNutation
                   | EphemerisFlags.TruePosition
                   | EphemerisFlags.NoAberration
                   | EphemerisFlags.NoGravDeflection;
@@ -332,20 +353,20 @@ public sealed class SwissEphemerides : IEphemerides
         };
     }
 
-    /// <summary>South node = (north + 180°) longitude with mirrored speed.</summary>
-    private static PlanetPosition ToSouthNode(BodyState northNode, EphCalculationMode mode)
+    /// <summary>
+    /// Geometric antipode: longitude + 180°, latitude and latitude-speed
+    /// sign-flipped. Used for the South Node (antipode of the North Node)
+    /// and the astrological Earth (antipode of the apparent Sun).
+    /// </summary>
+    private static PlanetPosition ToAntipode(PlanetPosition pos) => new()
     {
-        var north = ToPlanetPosition(northNode, mode);
-        return new PlanetPosition
-        {
-            Longitude = AstrologyMod360(north.Longitude + 180.0),
-            Latitude = -north.Latitude,
-            Distance = north.Distance,
-            SpeedLongitude = north.SpeedLongitude,
-            SpeedLatitude = -north.SpeedLatitude,
-            SpeedDistance = north.SpeedDistance,
-        };
-    }
+        Longitude = AstrologyMod360(pos.Longitude + 180.0),
+        Latitude = -pos.Latitude,
+        Distance = pos.Distance,
+        SpeedLongitude = pos.SpeedLongitude,
+        SpeedLatitude = -pos.SpeedLatitude,
+        SpeedDistance = pos.SpeedDistance,
+    };
 
     private static double AstrologyMod360(double deg)
     {

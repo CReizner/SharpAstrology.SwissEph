@@ -215,17 +215,22 @@ public sealed class BodyService
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The orbital-element math runs in geocentric mean ecliptic-of-date
-    /// cartesian. The Moshier moon source emits that frame natively; the
-    /// SwissEph and JPL moon sources emit geocentric J2000-equator
+    /// The orbital-element math runs in geocentric ecliptic-of-date
+    /// cartesian. The Moshier moon source emits the mean ecliptic natively;
+    /// the SwissEph and JPL moon sources emit geocentric J2000-equator
     /// cartesian, which <see cref="MoonToEclipticOfDate"/> rotates into
     /// ecliptic-of-date via ICRS bias, J2000 → date precession and a
-    /// mean-obliquity equator → ecliptic rotation — the SEFLG_NONUT subset
-    /// of <c>swi_plan_for_osc_elem</c> (sweph.c#L5758-L5856). Apparent-position
-    /// corrections (nutation, aberration, light-time, gravitational
-    /// deflection) are not layered on top, matching the geometric semantics
-    /// of <see cref="Phenomena.NodesAndApsidesService"/> and the existing
-    /// SEFLG_TRUEPOS+NONUT golden tests. Heliocentric and barycentric
+    /// mean-obliquity equator → ecliptic rotation — mirroring
+    /// <c>swi_plan_for_osc_elem</c> (sweph.c#L5758-L5856). Unless
+    /// <see cref="EphemerisFlags.NoNutation"/> is set, each lunar sample is
+    /// additionally nutated into the true ecliptic-and-equinox of its epoch,
+    /// exactly like the C original, so the resulting node honours nutation
+    /// (the element math then needs no further correction, per the comment
+    /// at sweph.c#L5468-L5472). Other apparent-position corrections
+    /// (aberration, light-time, gravitational deflection) are not layered
+    /// on top, matching the geometric semantics of
+    /// <see cref="Phenomena.NodesAndApsidesService"/> and the
+    /// SEFLG_TRUEPOS golden tests. Heliocentric and barycentric
     /// request bits short-circuit to zero (sweph.c#L860-L864).
     /// </para>
     /// </remarks>
@@ -243,16 +248,18 @@ public sealed class BodyService
         var (source, resolvedFlags) = ResolveMoonSource(normalisedFlags, jdEt);
 
         var includeSpeed = (normalisedFlags & (EphemerisFlags.Speed | EphemerisFlags.Speed3)) != 0;
+        var withNutation = (normalisedFlags & EphemerisFlags.NoNutation) == 0;
         var step = LunarOsculatingElements.StepDaysFor(source.Kind);
 
         // Fetch moon (pos+vel) at three epochs and rotate each into
-        // geocentric mean ecliptic-of-date for the orbital-element math.
-        var centerSample = FetchMoonInEclipticOfDate(source, jdEt, resolvedFlags);
+        // geocentric ecliptic-of-date (true ecliptic unless NoNutation is
+        // set) for the orbital-element math.
+        var centerSample = FetchMoonInEclipticOfDate(source, jdEt, resolvedFlags, withNutation);
         (Vec3, Vec3) minusSample = default, plusSample = default;
         if (includeSpeed)
         {
-            minusSample = FetchMoonInEclipticOfDate(source, new JulianDay(jdEt.Value - step), resolvedFlags);
-            plusSample = FetchMoonInEclipticOfDate(source, new JulianDay(jdEt.Value + step), resolvedFlags);
+            minusSample = FetchMoonInEclipticOfDate(source, new JulianDay(jdEt.Value - step), resolvedFlags, withNutation);
+            plusSample = FetchMoonInEclipticOfDate(source, new JulianDay(jdEt.Value + step), resolvedFlags, withNutation);
         }
 
         var result = LunarOsculatingElements.Compute(
@@ -300,33 +307,50 @@ public sealed class BodyService
 
     /// <summary>
     /// Fetch the moon (with speed) from <paramref name="source"/> and
-    /// rotate the cartesian state into geocentric mean ecliptic-of-date
+    /// rotate the cartesian state into geocentric ecliptic-of-date
     /// — the frame the <c>lunar_osc_elem</c> math expects.
     /// </summary>
     private (Vec3 Position, Vec3 Velocity) FetchMoonInEclipticOfDate(
-        IBodyPositionSource source, JulianDay jd, EphemerisFlags resolvedFlags)
+        IBodyPositionSource source, JulianDay jd, EphemerisFlags resolvedFlags, bool withNutation)
     {
         var moon = source.Compute(CelestialBody.Moon, jd, resolvedFlags | EphemerisFlags.Speed);
-        return MoonToEclipticOfDate(moon, jd.Value);
+        return MoonToEclipticOfDate(moon, jd.Value, withNutation);
     }
 
     /// <summary>
-    /// Rotate a moon <see cref="BodyState"/> into geocentric mean
-    /// ecliptic-of-date cartesian. Mirrors the SEFLG_NONUT subset of
-    /// <c>swi_plan_for_osc_elem</c> (sweph.c#L5758-L5856): ICRS → J2000
-    /// frame bias, then J2000 → date precession (rotation only — the
-    /// daily precession rate is not added to velocity per the C comment
-    /// at sweph.c#L5772-L5773), then equator-of-date → ecliptic-of-date
-    /// with mean obliquity. The Moshier moon source already emits this
-    /// frame (it bypasses the J2000-equator round trip the C library
-    /// runs in <c>ecldat_equ2000</c>), so the input is returned unchanged
-    /// on that branch.
+    /// Rotate a moon <see cref="BodyState"/> into geocentric
+    /// ecliptic-of-date cartesian. Mirrors <c>swi_plan_for_osc_elem</c>
+    /// (sweph.c#L5758-L5856): ICRS → J2000 frame bias, then J2000 → date
+    /// precession (rotation only — the daily precession rate is not added
+    /// to velocity per the C comment at sweph.c#L5772-L5773), then, when
+    /// <paramref name="withNutation"/> is set, the nutation matrix of the
+    /// sample epoch (rotation only on the speed vector too), then
+    /// equator-of-date → ecliptic-of-date with mean obliquity, and finally
+    /// the Δε rotation into the true ecliptic. The Moshier moon source
+    /// already emits the mean ecliptic-of-date (it bypasses the
+    /// J2000-equator round trip the C library runs in
+    /// <c>ecldat_equ2000</c>), so that branch only needs the
+    /// mean → true ecliptic lift when nutation is requested.
     /// </summary>
-    private (Vec3 Position, Vec3 Velocity) MoonToEclipticOfDate(BodyState moon, double jdTt)
+    private (Vec3 Position, Vec3 Velocity) MoonToEclipticOfDate(BodyState moon, double jdTt, bool withNutation)
     {
         if (moon.Frame == BodyStateFrame.GeocentricEclipticOfDate)
         {
-            return (moon.Position, moon.Velocity);
+            if (!withNutation)
+            {
+                return (moon.Position, moon.Velocity);
+            }
+            // Undoing the mean-obliquity rotation, applying the nutation
+            // steps on the equator and re-running the ecliptic transform is
+            // algebraically the C chain, which inserts the nutation matrix
+            // between precession and the ecliptic rotation.
+            Span<double> mpos = stackalloc double[3] { moon.Position.X, moon.Position.Y, moon.Position.Z };
+            Span<double> mvel = stackalloc double[3] { moon.Velocity.X, moon.Velocity.Y, moon.Velocity.Z };
+            var eps = Precession.MeanObliquity(jdTt, _models);
+            FrameTransform.EclipticToEquatorial(mpos, eps);
+            FrameTransform.EclipticToEquatorial(mvel, eps);
+            NutateEquatorOfDateSample(mpos, mvel, jdTt, eps);
+            return (new Vec3(mpos[0], mpos[1], mpos[2]), new Vec3(mvel[0], mvel[1], mvel[2]));
         }
         if (moon.Frame == BodyStateFrame.GeocentricJ2000Equator)
         {
@@ -339,8 +363,15 @@ public sealed class BodyService
             Precession.Apply(pos, AstronomicalConstants.J2000, jdTt, _models);
             Precession.Apply(vel, AstronomicalConstants.J2000, jdTt, _models);
             var meanEps = Precession.MeanObliquity(jdTt, _models);
-            FrameTransform.EquatorialToEcliptic(pos, meanEps);
-            FrameTransform.EquatorialToEcliptic(vel, meanEps);
+            if (withNutation)
+            {
+                NutateEquatorOfDateSample(pos, vel, jdTt, meanEps);
+            }
+            else
+            {
+                FrameTransform.EquatorialToEcliptic(pos, meanEps);
+                FrameTransform.EquatorialToEcliptic(vel, meanEps);
+            }
             return (new Vec3(pos[0], pos[1], pos[2]), new Vec3(vel[0], vel[1], vel[2]));
         }
         throw new InvalidOperationException(
@@ -348,15 +379,37 @@ public sealed class BodyService
     }
 
     /// <summary>
+    /// The nutation tail of <c>swi_plan_for_osc_elem</c>
+    /// (sweph.c#L5806-L5852) applied to a mean-equator-of-date sample:
+    /// nutation matrix of the sample epoch on position and velocity
+    /// (rotation only — the nutation rate is not added to the speed
+    /// vector), mean-obliquity equator → ecliptic, then the Δε rotation
+    /// into the true ecliptic-and-equinox of date.
+    /// </summary>
+    private void NutateEquatorOfDateSample(Span<double> pos, Span<double> vel, double jdTt, double meanEps)
+    {
+        var nut = Nutation.Compute(jdTt, _models);
+        Nutation.Apply(pos, nut, meanEps);
+        Nutation.Apply(vel, nut, meanEps);
+        FrameTransform.EquatorialToEcliptic(pos, meanEps);
+        FrameTransform.EquatorialToEcliptic(vel, meanEps);
+        FrameTransform.EquatorialToEcliptic(pos, nut.DeltaEpsilonRad);
+        FrameTransform.EquatorialToEcliptic(vel, nut.DeltaEpsilonRad);
+    }
+
+    /// <summary>
     /// Compute the mean lunar node (SE_MEAN_NODE) or mean lunar apogee
     /// (SE_MEAN_APOG, "Lilith" / Black Moon). Mirrors the body-specific
     /// branches at sweph.c#L859-L927: a Moshier-only path that bypasses the
-    /// planet pipeline, returning geocentric mean ecliptic-of-date cartesian.
+    /// planet pipeline, returning geocentric ecliptic-of-date cartesian
+    /// (true ecliptic unless <see cref="EphemerisFlags.NoNutation"/> is
+    /// set, per the nutation step of <c>app_pos_rest</c>).
     /// Heliocentric / barycentric request bits short-circuit to zero (no
     /// helio/bary meaning, sweph.c#L860-L864 / #L899-L903). The polar →
     /// cartesian conversion and one-sided finite-difference speed are owned
     /// by <see cref="MoshierBodyPositionSource"/>; this method only enforces
-    /// the helio/bary gate and forces a Moshier source.
+    /// the helio/bary gate, forces a Moshier source and layers the
+    /// nutation step on top.
     /// </summary>
     private BodyState ComputeMeanLunarPoint(CelestialBody body, JulianDay jdEt, EphemerisFlags normalisedFlags)
     {
@@ -377,18 +430,22 @@ public sealed class BodyService
 
         var sourceFlags = EphemerisFlags.MoshierEph
             | (normalisedFlags & (EphemerisFlags.Speed | EphemerisFlags.Speed3));
-        return source.Compute(body, jdEt, sourceFlags);
+        var state = source.Compute(body, jdEt, sourceFlags);
+        return NutateMeanEclipticPoint(state, jdEt, normalisedFlags);
     }
 
     /// <summary>
     /// Compute the interpolated lunar apogee (SE_INTP_APOG) or perigee
     /// (SE_INTP_PERG). Mirrors the body-specific branches at sweph.c#L971-L1015:
     /// a Moshier-only path that bypasses the planet pipeline, returning
-    /// geocentric mean ecliptic-of-date cartesian. Helio/bary request bits
+    /// geocentric ecliptic-of-date cartesian (true ecliptic unless
+    /// <see cref="EphemerisFlags.NoNutation"/> is set, per the nutation
+    /// step of <c>app_pos_rest</c>). Helio/bary request bits
     /// short-circuit to zero (no helio/bary meaning, sweph.c#L972-L976).
     /// The Newton search and the central-difference 0.1-day speed step are
     /// owned by <see cref="IBodyPositionSource"/>; this method only enforces
-    /// the helio/bary gate and forces a Moshier source.
+    /// the helio/bary gate, forces a Moshier source and layers the
+    /// nutation step on top.
     /// </summary>
     private BodyState ComputeInterpolatedLunarApside(CelestialBody body, JulianDay jdEt, EphemerisFlags normalisedFlags)
     {
@@ -409,7 +466,59 @@ public sealed class BodyService
 
         var sourceFlags = EphemerisFlags.MoshierEph
             | (normalisedFlags & (EphemerisFlags.Speed | EphemerisFlags.Speed3));
-        return source.Compute(body, jdEt, sourceFlags);
+        var state = source.Compute(body, jdEt, sourceFlags);
+        return NutateMeanEclipticPoint(state, jdEt, normalisedFlags);
+    }
+
+    /// <summary>
+    /// Lifts an analytically derived lunar point from the mean to the true
+    /// ecliptic-and-equinox of date — the nutation step of
+    /// <c>app_pos_rest</c> (sweph.c#L2787-L2804) as it applies to the
+    /// mean-node / mean-apogee / interpolated-apsides outputs, which arrive
+    /// here in geocentric mean ecliptic-of-date cartesian (the C library
+    /// rotates them onto the mean equator in <c>app_pos_etc_mean</c> first,
+    /// sweph.c#L4330-L4332): rotate to the mean equator, run
+    /// <c>swi_nutate</c> (nutation matrix; with speed also the
+    /// nutation-rate term), rotate back with mean obliquity and finally by
+    /// Δε. No-op when <see cref="EphemerisFlags.NoNutation"/> is set.
+    /// </summary>
+    private BodyState NutateMeanEclipticPoint(BodyState state, JulianDay jdEt, EphemerisFlags normalisedFlags)
+    {
+        if ((normalisedFlags & EphemerisFlags.NoNutation) != 0)
+        {
+            return state;
+        }
+
+        var includeSpeed = (normalisedFlags & (EphemerisFlags.Speed | EphemerisFlags.Speed3)) != 0;
+        Span<double> s = stackalloc double[6];
+        s[0] = state.Position.X; s[1] = state.Position.Y; s[2] = state.Position.Z;
+        s[3] = state.Velocity.X; s[4] = state.Velocity.Y; s[5] = state.Velocity.Z;
+        var pos = s.Slice(0, 3);
+        var vel = s.Slice(3, 3);
+
+        var meanEps = Precession.MeanObliquity(jdEt.Value, _models);
+        var nut = Nutation.Compute(jdEt.Value, _models);
+        FrameTransform.EclipticToEquatorial(pos, meanEps);
+        FrameTransform.EclipticToEquatorial(vel, meanEps);
+        if (includeSpeed)
+        {
+            Nutation.ApplyWithSpeed(s, jdEt.Value, backward: false, _models);
+        }
+        else
+        {
+            Nutation.Apply(pos, nut, meanEps);
+        }
+        FrameTransform.EquatorialToEcliptic(pos, meanEps);
+        FrameTransform.EquatorialToEcliptic(vel, meanEps);
+        FrameTransform.EquatorialToEcliptic(pos, nut.DeltaEpsilonRad);
+        FrameTransform.EquatorialToEcliptic(vel, nut.DeltaEpsilonRad);
+
+        return new BodyState(
+            new Vec3(s[0], s[1], s[2]),
+            new Vec3(s[3], s[4], s[5]),
+            state.Distance,
+            state.Source,
+            state.Frame);
     }
 
     private BodyState ResolveSunState(JulianDay jdEt, EphemerisFlags flags, BodyState earth)
