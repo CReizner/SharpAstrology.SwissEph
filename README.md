@@ -2,7 +2,7 @@
 
 ## About
 This package provides an implementation of the IEphemerides interface from [SharpAstrology.Base](https://github.com/CReizner/SharpAstrology.Base).
-This is an idiomatic C# rewrite of the swisseph C library (version 2.10.3).
+It attempts to mimic the behavior of the C library swisseph (version 2.10.3).
 
 ## SharpAstrology Packages
 | Package                                                                                                                | Description                                  | Licence  |
