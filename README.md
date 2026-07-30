@@ -5,15 +5,18 @@ This package provides an implementation of the IEphemerides interface from [Shar
 It attempts to mimic the behavior of the C library swisseph (version 2.10.3).
 
 ## SharpAstrology Packages
-| Package                                                                                                                | Description                                  | Licence  |
-|:-----------------------------------------------------------------------------------------------------------------------|:---------------------------------------------|:--------:|
-| [SharpAstrology.Base](https://github.com/CReizner/SharpAstrology.Base)                                                 | Base library                                 |   MIT    |
-| [SharpAstrology.SwissEph](https://github.com/CReizner/SharpAstrology.SwissEph)                                         | Ephemerides package based on SwissEphNet     | AGPL-3.0 |
-| [SharpAstrology.HumanDesign](https://github.com/CReizner/SharpAstrology.HumanDesign)                                   |  Extensions for the Human Design system      |   MIT    |
-| [SharpAstrology.HumanDesign.BlazorComponents](https://github.com/CReizner/SharpAstrology.HumanDesign.BlazorComponents) | Human Design charts as Blazor components      |   MIT    |
-| [SharpAstrology.Vedic](https://github.com/CReizner/SharpAstrology.Vedic)                                               | Extensions for Vedic astrology systems        |   MIT    |
-| [SharpAstrology.West](https://github.com/CReizner/SharpAstrology.West)                                                 | Extensions for western astrology systems      |   MIT    |
-| [SharpAstrology.West.BlazorComponents](https://github.com/CReizner/SharpAstrology.West.BlazorComponents)               | Western astrology charts as Blazor components |   MIT    |
+| Package                                                                                                                | Description                                            | Licence  |
+|:-----------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------|:--------:|
+| [SharpAstrology.Base](https://github.com/CReizner/SharpAstrology.Base)                                                 | Base library                                           |   MIT    |
+| [SharpAstrology.SwissEph](https://github.com/CReizner/SharpAstrology.SwissEph)                                         | Ephemerides package based on SwissEphNet               | AGPL-3.0 |
+| [SharpAstrology.Symbols.BlazorComponents](https://github.com/CReizner/SharpAstrology.Symbols.BlazorComponents)         | Astrological symbols as Blazor components              |   MIT    |
+| [SharpAstrology.HumanDesign](https://github.com/CReizner/SharpAstrology.HumanDesign)                                   | Extensions for the Human Design system                 |   MIT    |
+| [SharpAstrology.HumanDesign.BlazorComponents](https://github.com/CReizner/SharpAstrology.HumanDesign.BlazorComponents) | Human Design charts as Blazor components               |   MIT    |
+| [SharpAstrology.Vedic](https://github.com/CReizner/SharpAstrology.Vedic)                                               | Extensions for Vedic astrology systems                 |   MIT    |
+| [SharpAstrology.Vedic.BlazorComponents](https://github.com/CReizner/SharpAstrology.Vedic.BlazorComponents)             | Vedic astrology charts as Blazor components            |   MIT    |
+| [SharpAstrology.West](https://github.com/CReizner/SharpAstrology.West)                                                 | Extensions for western astrology systems               |   MIT    |
+| [SharpAstrology.West.BlazorComponents](https://github.com/CReizner/SharpAstrology.West.BlazorComponents)               | Western astrology charts as Blazor components          |   MIT    |
+| [SharpAstrology.WebApp](https://github.com/CReizner/SharpAstrology.WebApp)                                             | Blazor Server app built on the SharpAstrology packages | AGPL-3.0 |
 
 ## Install
 ```shell
@@ -98,6 +101,11 @@ using (IEphemerides eph = ephemeridesService.CreateContext(Ayanamsas.Lahiri))
 }
 ```
 
+`EphCalculationMode.Sidereal` applies to every supported object, the lunar nodes and the
+astrological Earth included. For all of them the sidereal longitude is the tropical longitude
+minus the ayanamsa. The latitude and the distance stay untouched, and the longitude speed
+differs by the proper motion of the ayanamsa alone.
+
 ## Use swiss eph files or JPL files for more precision
 Follow the instruction from the original [swisseph project](https://github.com/aloistr/swisseph) and download the files you want. Than save to files into a folder and use the path to that folder in the SwissEphemeridesService constructor.
 
@@ -121,3 +129,25 @@ using (IEphemerides eph = ephemeridesService.CreateContext())
     // calculate positions here
 }
 ```
+
+A JPL folder should hold the swiss eph files as well. A JPL kernel contains the main
+bodies only, so asteroids like Chiron are always read from the `seas` files, which is
+what the original C library does too.
+
+## Fail instead of silently losing precision
+By default a missing `.se1` file makes the calculation fall back to Moshier for that
+body, matching the C library. Applications that must not compute with a weaker source
+behind the user's back can switch that off. A missing file then throws a
+`FileNotFoundException` naming the expected path, and a missing folder throws a
+`DirectoryNotFoundException`. House cusps and angles need no files at all and keep
+working either way.
+
+```C#
+ephemeridesService = new SwissEphemeridesService(
+    rootPathToEph: "[PATH_TO_SWISSEPH_ROOT_FOLDER]",
+    ephType: EphType.Swiss,
+    allowMoshierFallback: false);
+```
+
+Note that the mean lunar node is implemented by the Moshier mean element series only.
+Without the Moshier fallback, only the true node is available.

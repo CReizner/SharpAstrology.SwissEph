@@ -76,17 +76,25 @@ public sealed class BodyService
         // osculating-element engine (TrueNode / OsculatingApogee, via
         // ComputeLunarOsculatingPoint) and the mean-element engine
         // (MeanNode / MeanApogee, served by IBodyPositionSource directly).
+        //
+        // Each branch returns a geocentric ecliptic-of-date state and then
+        // passes the sidereal gate, exactly like the planet path below. The C
+        // library reaches its own sidereal step through app_pos_etc_mean /
+        // app_pos_rest for these bodies too (sweph.c#L4330-L4360), so without
+        // the gate here SEFLG_SIDEREAL would silently do nothing for Rahu and
+        // Ketu, and a sidereal chart would be worse than a tropical one with
+        // the ayanamsha taken off afterwards.
         if (body == CelestialBody.TrueNode || body == CelestialBody.OsculatingApogee)
         {
-            return ComputeLunarOsculatingPoint(body, jdEt, normalised);
+            return ApplySiderealIfRequested(ComputeLunarOsculatingPoint(body, jdEt, normalised), jdEt, normalised);
         }
         if (body == CelestialBody.MeanNode || body == CelestialBody.MeanApogee)
         {
-            return ComputeMeanLunarPoint(body, jdEt, normalised);
+            return ApplySiderealIfRequested(ComputeMeanLunarPoint(body, jdEt, normalised), jdEt, normalised);
         }
         if (body == CelestialBody.InterpolatedApogee || body == CelestialBody.InterpolatedPerigee)
         {
-            return ComputeInterpolatedLunarApside(body, jdEt, normalised);
+            return ApplySiderealIfRequested(ComputeInterpolatedLunarApside(body, jdEt, normalised), jdEt, normalised);
         }
 
         // Fetch raw body state with one source. SwissEph CanProvide=true but
@@ -128,24 +136,32 @@ public sealed class BodyService
         var fetcher = new Refetcher(this, observer);
         var apparent = _pipeline.Apply(rawBody, rawObserver, rawEarthCenter, rawSun, in fetcher, body, jdEt, resolvedFlags);
 
-        // ---- Sidereal step (sweph.c#L2811-L2837) -------------------------
-        // Mirrors the "traditional algorithm" branch of app_pos_rest:
-        // convert tropical ecliptic-of-date longitude/lat to polar, subtract
-        // ayanamsha (and its time-derivative on speed), convert back to
-        // cartesian. Only fires for the non-J2000, non-equatorial,
-        // non-helio/bary geocentric ecliptic-of-date branch — the only one
-        // where SEFLG_SIDEREAL produces a meaningful sidereal longitude in
-        // the reference C library (the other projection variants are SSY /
-        // ECL_T0 paths kept for M-XX completeness).
-        if ((resolvedFlags & EphemerisFlags.Sidereal) != 0
-            && (resolvedFlags & EphemerisFlags.Equatorial) == 0
-            && (resolvedFlags & EphemerisFlags.J2000Equinox) == 0
-            && (resolvedFlags & (EphemerisFlags.Heliocentric | EphemerisFlags.Barycentric)) == 0)
-        {
-            apparent = ApplySidereal(apparent, jdEt, resolvedFlags);
-        }
+        return ApplySiderealIfRequested(apparent, jdEt, resolvedFlags);
+    }
 
-        return apparent;
+    /// <summary>
+    /// The sidereal gate (sweph.c#L2811-L2837). Runs the "traditional
+    /// algorithm" branch of <c>app_pos_rest</c> when the flags ask for it:
+    /// convert tropical ecliptic-of-date longitude/lat to polar, subtract
+    /// ayanamsha (and its time-derivative on speed), convert back to
+    /// cartesian. Only fires for the non-J2000, non-equatorial,
+    /// non-helio/bary geocentric ecliptic-of-date branch — the only one
+    /// where SEFLG_SIDEREAL produces a meaningful sidereal longitude in
+    /// the reference C library (the other projection variants are SSY /
+    /// ECL_T0 paths kept for M-XX completeness). Every branch of
+    /// <see cref="Compute"/> passes through here, so the gate cannot be
+    /// forgotten for one body class.
+    /// </summary>
+    private BodyState ApplySiderealIfRequested(BodyState state, JulianDay jdEt, EphemerisFlags flags)
+    {
+        if ((flags & EphemerisFlags.Sidereal) != 0
+            && (flags & EphemerisFlags.Equatorial) == 0
+            && (flags & EphemerisFlags.J2000Equinox) == 0
+            && (flags & (EphemerisFlags.Heliocentric | EphemerisFlags.Barycentric)) == 0)
+        {
+            return ApplySidereal(state, jdEt, flags);
+        }
+        return state;
     }
 
     /// <summary>

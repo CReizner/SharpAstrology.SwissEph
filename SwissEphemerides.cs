@@ -282,44 +282,72 @@ public sealed class SwissEphemerides : IEphemerides
     };
 
     /// <summary>
-    /// Default body flags (high-precision velocity + the user's tropical /
-    /// sidereal selector). Equivalent to <c>SEFLG_SPEED [|SEFLG_SIDEREAL]</c>.
+    /// Default body flags (high-precision velocity + the context's preferred
+    /// source + the user's tropical / sidereal selector). Equivalent to
+    /// <c>SEFLG_SPEED | SEFLG_SWIEPH [|SEFLG_SIDEREAL]</c> for a default
+    /// context.
     /// </summary>
-    private static EphemerisFlags ResolveBodyFlags(EphCalculationMode mode)
+    private EphemerisFlags ResolveBodyFlags(EphCalculationMode mode)
     {
-        var flags = EphemerisFlags.Speed;
+        var flags = EphemerisFlags.Speed | SourceFlag(_ctx.PreferredSource);
         if (mode == EphCalculationMode.Sidereal) flags |= EphemerisFlags.Sidereal;
         return flags;
     }
 
     /// <summary>
+    /// The three source bits, mirroring <c>PlausibilityCheck.SourceMask</c>.
+    /// Needed here because the mean-node path has to clear an inherited source
+    /// bit before forcing its own — two source bits at once are rejected by
+    /// <c>PlausibilityCheck.Normalize</c>.
+    /// </summary>
+    private const EphemerisFlags SourceMask =
+        EphemerisFlags.JplEph | EphemerisFlags.SwissEph | EphemerisFlags.MoshierEph;
+
+    /// <summary>
+    /// <see cref="EphemerisSource"/> → the matching request bit. Without this
+    /// the adapter would leave the source unnamed and
+    /// <c>PlausibilityCheck.Normalize</c> would fill in <c>SwissEph</c>, so a
+    /// JPL-configured context could never reach its JPL source.
+    /// </summary>
+    private static EphemerisFlags SourceFlag(EphemerisSource source) => source switch
+    {
+        EphemerisSource.Jpl => EphemerisFlags.JplEph,
+        EphemerisSource.Moshier => EphemerisFlags.MoshierEph,
+        _ => EphemerisFlags.SwissEph,
+    };
+
+    /// <summary>
     /// Geometric flag set required by the lunar-osculating-elements branch
     /// of <see cref="BodyService"/> (see
     /// <see cref="LunarOsculatingElements"/>): no aberration, no
-    /// gravitational deflection, true position, no source hint. Nutation
+    /// gravitational deflection, true position. Nutation
     /// stays enabled so node longitudes refer to the true equinox of date,
     /// matching the C library's default output (its node path ignores the
     /// aberration / deflection / true-position bits anyway).
-    /// Source selection is left to the context's <c>SourceRouter</c>.
-    /// Sidereal projection is layered on top by the regular
-    /// <c>BodyService</c> sidereal step.
+    /// The moon position underneath comes from the context's preferred source.
+    /// The sidereal bit added by <see cref="NodeGeometryFlags"/> reaches the
+    /// sidereal gate of <see cref="BodyService.Compute"/>, which runs on the
+    /// osculating-elements branch as well.
     /// </summary>
-    private static EphemerisFlags TrueNodeFlags(EphCalculationMode mode) => NodeGeometryFlags(mode);
+    private EphemerisFlags TrueNodeFlags(EphCalculationMode mode) => NodeGeometryFlags(mode);
 
     /// <summary>
     /// Mean lunar node is currently implemented by the analytical Moshier
     /// mean-element series only, so the adapter keeps forcing that source for
-    /// the mean-node strategy even inside SwissEph/JPL-capable contexts.
+    /// the mean-node strategy even inside SwissEph/JPL-capable contexts. The
+    /// inherited preferred-source bit has to be cleared first, because
+    /// <c>PlausibilityCheck.Normalize</c> rejects two source bits at once.
     /// </summary>
-    private static EphemerisFlags MeanNodeFlags(EphCalculationMode mode) =>
-        NodeGeometryFlags(mode) | EphemerisFlags.MoshierEph;
+    private EphemerisFlags MeanNodeFlags(EphCalculationMode mode) =>
+        (NodeGeometryFlags(mode) & ~SourceMask) | EphemerisFlags.MoshierEph;
 
-    private static EphemerisFlags NodeGeometryFlags(EphCalculationMode mode)
+    private EphemerisFlags NodeGeometryFlags(EphCalculationMode mode)
     {
         var flags = EphemerisFlags.Speed
                   | EphemerisFlags.TruePosition
                   | EphemerisFlags.NoAberration
-                  | EphemerisFlags.NoGravDeflection;
+                  | EphemerisFlags.NoGravDeflection
+                  | SourceFlag(_ctx.PreferredSource);
         if (mode == EphCalculationMode.Sidereal) flags |= EphemerisFlags.Sidereal;
         return flags;
     }

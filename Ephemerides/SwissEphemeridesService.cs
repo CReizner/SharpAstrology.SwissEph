@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using SharpAstrology.Enums;
 using SharpAstrology.Interfaces;
 using SharpAstrology.SwissEphemerides;
+using SharpAstrology.SwissEphemerides.Application.Bodies;
 using SharpAstrology.SwissEphemerides.Application.Sidereal;
 
 namespace SharpAstrology.Ephemerides;
@@ -18,6 +19,7 @@ public sealed class SwissEphemeridesService
 {
     private readonly string? _rootPathToEph;
     private readonly EphType _ephType;
+    private readonly bool _allowMoshierFallback;
 
     /// <summary>
     /// Creates the SwissEphemerides factory.
@@ -30,10 +32,37 @@ public sealed class SwissEphemeridesService
     ///     <see cref="EphType.Moshier"/>.
     /// </param>
     /// <param name="ephType">Selects the underlying ephemeris source.</param>
-    public SwissEphemeridesService(string? rootPathToEph = null, EphType ephType = EphType.Swiss)
+    /// <param name="allowMoshierFallback">
+    ///     When <see langword="true"/> (the default), a missing <c>.se1</c>
+    ///     segment silently degrades to the Moshier analytical theory, matching
+    ///     the C library. Pass <see langword="false"/> for applications that
+    ///     must never compute with a lower-precision source behind the user's
+    ///     back: a missing file then surfaces as
+    ///     <see cref="FileNotFoundException"/> naming the expected path.
+    ///     Calls <see cref="EphemerisContextBuilder.DisableMoshier"/> under the
+    ///     hood.
+    /// </param>
+    /// <exception cref="ArgumentException">
+    ///     <see cref="EphType.Moshier"/> is combined with
+    ///     <paramref name="allowMoshierFallback"/> = <see langword="false"/>,
+    ///     which would leave no body-position source at all.
+    /// </exception>
+    public SwissEphemeridesService(
+        string? rootPathToEph = null,
+        EphType ephType = EphType.Swiss,
+        bool allowMoshierFallback = true)
     {
+        if (ephType == EphType.Moshier && !allowMoshierFallback)
+        {
+            throw new ArgumentException(
+                "EphType.Moshier requires allowMoshierFallback: true — disabling Moshier would "
+                + "leave no body-position source. Use EphType.Swiss or EphType.Jpl for strict mode.",
+                nameof(allowMoshierFallback));
+        }
+
         _rootPathToEph = rootPathToEph;
         _ephType = ephType;
+        _allowMoshierFallback = allowMoshierFallback;
     }
 
     /// <summary>
@@ -60,11 +89,17 @@ public sealed class SwissEphemeridesService
                 var dir = ResolveEphRoot();
                 builder.UseSwissEphFiles(dir);
                 builder.UseJplFile(ResolveJplFile(dir));
+                // Without this the adapter leaves the source bits empty and
+                // PlausibilityCheck defaults them to SwissEph, so the JPL
+                // source would be registered but never selected.
+                builder.UsePreferredSource(EphemerisSource.Jpl);
                 break;
             default:
                 throw new ArgumentException(
                     $"Unknown EphType: {_ephType}.", nameof(_ephType));
         }
+
+        if (!_allowMoshierFallback) builder.DisableMoshier();
 
         builder.UseSiderealMode(MapAyanamsa(ayanamsa));
 

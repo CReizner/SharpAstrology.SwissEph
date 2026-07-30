@@ -53,6 +53,9 @@ public sealed class EphemerisContextBuilder
     private string? _fixedStarCatalogPath;
     private Func<Stream>? _fixedStarCatalogStreamFactory;
     private LunarNodeStrategy _lunarNodeStrategy = LunarNodeStrategy.TrueNode;
+    // null = never set explicitly, so the adapter keeps the historical
+    // SwissEph default. An explicit value is validated in Build.
+    private EphemerisSource? _preferredSource;
 
     /// <summary>
     /// Enables the Swiss Ephemeris back-end and points it at a directory of
@@ -214,6 +217,40 @@ public sealed class EphemerisContextBuilder
     }
 
     /// <summary>
+    /// Selects the ephemeris source the
+    /// <see cref="SharpAstrology.Interfaces.IEphemerides"/> adapter requests
+    /// when the caller does not name one itself. Defaults to
+    /// <see cref="EphemerisSource.SwissEph"/>, which matches the C library's
+    /// <c>plaus_iflag</c> default (<c>sweph.c#L6107</c>) and the behaviour of
+    /// earlier versions. Set it to <see cref="EphemerisSource.Jpl"/> to make a
+    /// context configured via <see cref="UseJplFile"/> actually compute from
+    /// the JPL kernel through the adapter.
+    /// </summary>
+    /// <remarks>
+    /// This only fills in the source bit for calls that arrive without one.
+    /// The lower-level <see cref="EphemerisContext.Bodies"/> service is
+    /// unaffected: an explicit <see cref="EphemerisFlags"/> source bit always
+    /// wins. Bodies the preferred source structurally cannot serve still route
+    /// through <c>SourceRouter</c>, so asteroids keep coming from the
+    /// <c>.se1</c> files even in a JPL-preferring context.
+    /// </remarks>
+    /// <param name="source">Preferred body-position source.</param>
+    /// <returns>The builder, for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="source"/> is <see cref="EphemerisSource.Unknown"/> or
+    /// not a defined value.
+    /// </exception>
+    public EphemerisContextBuilder UsePreferredSource(EphemerisSource source)
+    {
+        if (source is not (EphemerisSource.Jpl or EphemerisSource.SwissEph or EphemerisSource.Moshier))
+            throw new ArgumentOutOfRangeException(
+                nameof(source), source, "Preferred source must be Jpl, SwissEph or Moshier.");
+
+        _preferredSource = source;
+        return this;
+    }
+
+    /// <summary>
     /// Materialises a fresh <see cref="EphemerisContext"/> from the
     /// configured sources and models. The returned context is independent
     /// of the builder; you can keep building or discard the builder
@@ -253,6 +290,17 @@ public sealed class EphemerisContextBuilder
             throw new InvalidOperationException(
                 "EphemerisContextBuilder.Build: at least one body-position source must be enabled "
                 + "(UseSwissEphFiles, UseJplFile, or leave Moshier enabled).");
+        }
+
+        // An explicitly preferred source that is not registered would only fail
+        // on the first computation, which is a poor place to notice a wiring
+        // mistake. The implicit SwissEph default stays unvalidated: a
+        // Moshier-only context is a legitimate, and common, configuration.
+        if (_preferredSource is { } wanted && !sources.Exists(s => s.Kind == wanted))
+        {
+            throw new InvalidOperationException(
+                $"EphemerisContextBuilder.Build: preferred source {wanted} is not configured. "
+                + "Call UseJplFile / UseSwissEphFiles for it, or leave Moshier enabled.");
         }
 
         var calendar = new CalendarService();
@@ -331,6 +379,7 @@ public sealed class EphemerisContextBuilder
             nodesAndApsides,
             planetocentric,
             _lunarNodeStrategy,
+            _preferredSource ?? EphemerisSource.SwissEph,
             disposables);
     }
 

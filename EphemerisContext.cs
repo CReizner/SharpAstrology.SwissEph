@@ -50,6 +50,7 @@ public sealed class EphemerisContext : IDisposable
         NodesAndApsidesService nodesAndApsides,
         PlanetocentricService planetocentric,
         LunarNodeStrategy lunarNodeStrategy,
+        EphemerisSource preferredSource,
         IReadOnlyList<IDisposable> ownedDisposables)
     {
         Calendar = calendar;
@@ -62,6 +63,7 @@ public sealed class EphemerisContext : IDisposable
         NodesAndApsides = nodesAndApsides;
         Planetocentric = planetocentric;
         LunarNodeStrategy = lunarNodeStrategy;
+        PreferredSource = preferredSource;
         _ownedDisposables = ownedDisposables;
     }
 
@@ -139,6 +141,17 @@ public sealed class EphemerisContext : IDisposable
     /// default is <see cref="LunarNodeStrategy.TrueNode"/>.
     /// </summary>
     public LunarNodeStrategy LunarNodeStrategy { get; }
+
+    /// <summary>
+    /// Body-position source the
+    /// <see cref="SharpAstrology.Interfaces.IEphemerides"/> adapter requests
+    /// for calls that carry no explicit source bit. Configured via
+    /// <see cref="EphemerisContextBuilder.UsePreferredSource"/>; the default is
+    /// <see cref="EphemerisSource.SwissEph"/>, matching <c>plaus_iflag</c>
+    /// (<c>sweph.c#L6107</c>). Bodies the preferred source cannot serve are
+    /// still routed by <c>SourceRouter</c>.
+    /// </summary>
+    public EphemerisSource PreferredSource { get; }
 
     /// <summary>
     /// Returns this context as an <see cref="SharpAstrology.Interfaces.IEphemerides"/>

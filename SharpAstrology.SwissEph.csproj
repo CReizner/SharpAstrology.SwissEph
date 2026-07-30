@@ -14,10 +14,10 @@
     <RootNamespace>SharpAstrology.SwissEphemerides</RootNamespace>
     <AssemblyName>SharpAstrology.SwissEph</AssemblyName>
     <PackageId>SharpAstrology.SwissEph</PackageId>
-    <Version>0.4.2</Version>
+    <Version>0.5.1</Version>
     <Authors>Christian Reizner</Authors>
     <Description>Swiss Ephemeris ported to idiomatic C# (.NET 10). Drop-in successor of SharpAstrology.SwissEph 0.3.0: same SwissEphemeridesService/IEphemerides surface, no native dependencies. Implements SharpAstrology.Base.IEphemerides.</Description>
-    <PackageReleaseNotes>0.4.2: Fixes wrong positions for Chiron, Pholus, Ceres, Pallas, Juno and Vesta. Their heliocentric file records were returned without adding the barycentric Sun, shifting geocentric longitudes by up to ~0.11° (Ceres) and ~0.03° (Chiron). Asteroid positions now match the Swiss Ephemeris C library to sub-milliarcsecond level and are covered by golden tests.</PackageReleaseNotes>
+    <PackageReleaseNotes>0.5.0: EphType.Jpl now really computes from the JPL kernel through IEphemerides. The adapter used to leave the source unnamed, so the SwissEph default took over and a JPL-configured service silently returned SwissEph or Moshier values. New EphemerisContextBuilder.UsePreferredSource for the same choice at the low level. Bodies a DE kernel never contains, asteroids above all, are served from the .se1 files as in the C library. New SwissEphemeridesService constructor parameter allowMoshierFallback: pass false to turn a missing .se1 file into a FileNotFoundException instead of a silent fall back to Moshier. UnsupportedBodyException now names the source the caller asked for instead of the last one tried. All additions are opt-in, existing behaviour is unchanged.</PackageReleaseNotes>
     <PackageProjectUrl>https://github.com/CReizner/SharpAstrology.SwissEph</PackageProjectUrl>
     <RepositoryUrl>https://github.com/CReizner/SharpAstrology.SwissEph</RepositoryUrl>
     <PackageTags>Astrology;SwissEphemeris;Ephemeris;IEphemerides</PackageTags>
@@ -29,8 +29,12 @@
     <PackageReference Include="System.Numerics.Tensors" Version="10.0.7" />
   </ItemGroup>
 
+  <!-- The floor is only used in a clone of this repository alone, where the sibling project
+       is missing. Packing from the full working copy takes the version of the referenced
+       project instead, so the floor is kept at the version that project currently has.
+       Both ways then produce the same dependency. -->
   <PropertyGroup>
-    <SharpAstrologyBaseVersion>[0.12.0,)</SharpAstrologyBaseVersion>
+    <SharpAstrologyBaseVersion>[0.13.0,)</SharpAstrologyBaseVersion>
   </PropertyGroup>
 
   <ItemGroup Condition="Exists('../SharpAstrology.Base/SharpAstrology.Base.csproj')">

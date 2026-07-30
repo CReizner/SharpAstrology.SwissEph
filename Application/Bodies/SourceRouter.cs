@@ -18,8 +18,11 @@ namespace SharpAstrology.SwissEphemerides.Application.Bodies;
 /// graph as our cascade — with one deliberate divergence:
 /// <see cref="EphemerisFlags.JplEph"/> never falls back silently
 /// (<c>ARCHITECTURE.md §3.4</c>). When JPL is requested but unavailable
-/// (no source registered, or the chosen body is not in the JPL ephemeris)
-/// the router throws instead of substituting a different back-end. The
+/// (no source registered) the router throws instead of substituting a
+/// different back-end. Bodies a DE kernel structurally never contains —
+/// asteroids above all — are the one exception: they are served from the
+/// SwissEph source when one is configured, mirroring the C library, where
+/// <c>SEFLG_JPLEPH</c> only ever applied to the main bodies. The
 /// SwissEph → Moshier fallback for missing <c>.se1</c> segments stays:
 /// SwissEph is the C library's "best available" source, Moshier its
 /// analytical understudy, so silent degrade matches caller expectations.
@@ -91,17 +94,22 @@ internal sealed class SourceRouter
     /// is registered with this context.
     /// </exception>
     /// <exception cref="UnsupportedBodyException">
-    /// The chosen source cannot serve <paramref name="body"/>. For JPL this
-    /// is a hard fail; for SwissEph/Moshier it is reached only after the
-    /// fallback chain exhausts.
+    /// No configured source can serve <paramref name="body"/>. The exception
+    /// names the source the caller asked for, not the last one tried.
     /// </exception>
     public (IBodyPositionSource Source, EphemerisFlags Flags) Resolve(
         EphemerisFlags flags,
         CelestialBody body,
         JulianDay jdEt)
     {
-        // 1. JPL is honoured strictly: no silent substitution. Either we
-        //    have the source and it covers the body, or we throw.
+        // The requested source is remembered for the failure path: after the
+        // SwissEph → Moshier flag swap below, the flags no longer say what the
+        // caller actually asked for, and reporting "Moshier" for a SwissEph
+        // request in a context without Moshier is actively misleading.
+        var requested = _SourceFromFlags(flags);
+
+        // 1. JPL is honoured strictly for everything the kernel holds: no
+        //    silent substitution on missing data.
         if ((flags & EphemerisFlags.JplEph) != 0)
         {
             if (_jpl is null)
@@ -111,9 +119,18 @@ internal sealed class SourceRouter
                     + "EphemerisContextBuilder.UseJplFile(...), or pass EphemerisFlags.SwissEph / "
                     + "EphemerisFlags.MoshierEph instead. JPL never falls back silently "
                     + "(ARCHITECTURE.md §3.4).");
-            if (!_jpl.CanProvide(body))
-                throw new UnsupportedBodyException(body, EphemerisSource.Jpl);
-            return (_jpl, flags);
+            if (_jpl.CanProvide(body)) return (_jpl, flags);
+
+            // A DE kernel structurally contains the main bodies only — no
+            // asteroids, no derived points. The C library treats SEFLG_JPLEPH
+            // the same way: asteroid requests read the .se1 asteroid file
+            // regardless of the source bit (sweph.c swecalc, SEI_FILE_ANY_AST).
+            // This is not the silent-degrade case §3.4 rules out: the data is
+            // not missing, it was never in the kernel to begin with.
+            if (_swissEph is not null && _swissEph.CanProvide(body))
+                return (_swissEph, (flags & ~EphemerisFlags.JplEph) | EphemerisFlags.SwissEph);
+
+            throw new UnsupportedBodyException(body, EphemerisSource.Jpl);
         }
         if ((flags & EphemerisFlags.SwissEph) != 0)
         {
@@ -127,7 +144,15 @@ internal sealed class SourceRouter
             if (TryUse(_moshier, body, out var s)) return (s, flags);
         }
 
-        throw new UnsupportedBodyException(body, _SourceFromFlags(flags));
+        // Report the source the caller asked for whenever this context owns it.
+        // If it does not own it, the substitute that was actually tried is the
+        // more useful name: "Chiron is not supported by Moshier" beats a
+        // SwissEph message in a Moshier-only context. Only when neither exists
+        // do we fall back to naming the request itself.
+        var lastTried = _SourceFromFlags(flags);
+        throw new UnsupportedBodyException(
+            body,
+            Has(requested) ? requested : Has(lastTried) ? lastTried : requested);
     }
 
     private static EphemerisSource _SourceFromFlags(EphemerisFlags flags)
