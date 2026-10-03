@@ -138,7 +138,37 @@ internal sealed class CorrectionPipeline
         var dtsave = 0.0;
         Span<double> xxsp = stackalloc double[3];
         var hasXxsp = false;
-        if (!truePos)
+        if (!truePos && body == CelestialBody.Moon)
+        {
+            // Moon has its own light-time prescription (app_pos_etc_moon),
+            // not the planet iteration/change-of-dt speed correction above.
+            // Compute one delay from the Moon-observer range at reception.
+            Span<double> range = stackalloc double[3];
+            for (var i = 0; i < 3; i++)
+                range[i] = xx0[i] - (isBary ? 0.0 : isHelio ? xSun[i] : xobs[i]);
+            dtsave = System.Math.Sqrt(range[0] * range[0] + range[1] * range[1] + range[2] * range[2])
+                * AstronomicalConstants.LightTimeAuPerDay;
+            if (rawBody.Source == EphemerisSource.Moshier)
+            {
+                // C's analytical Moon uses linear retarding of the already
+                // lifted state, retaining its original velocity.
+                for (var i = 0; i < 3; i++) xx[i] = xx0[i] - dtsave * xx0[i + 3];
+                for (var i = 3; i < 6; i++) xx[i] = xx0[i];
+            }
+            else
+            {
+                var emission = new JulianDay(jdEt.Value - dtsave);
+                ToJ2000Equator(fetcher.RefetchBody(body, emission, flags), emission.Value, xx);
+                // Both raw Moon and Earth center must belong to t-dt. Keep
+                // observer(t) for the later parallax/aberration subtraction.
+                Span<double> earthAtEmission = stackalloc double[6];
+                ToJ2000Equator(fetcher.RefetchEarthCenter(emission, flags), emission.Value, earthAtEmission);
+                for (var i = 0; i < 6; i++) xx[i] += earthAtEmission[i];
+            }
+            if (isHelio && rawBody.Source != EphemerisSource.Moshier)
+                for (var i = 0; i < 6; i++) xx[i] -= xSun[i];
+        }
+        else if (!truePos)
         {
             // Number of refinement iterations beyond the initial estimate.
             // Mirrors C: JPL/SwissEph use 1; Moshier uses 0 (sweph.c#L2546-L2551).
@@ -486,6 +516,9 @@ internal sealed class CorrectionPipeline
         /// supplied time, with any topocentric offset already folded in.
         /// </summary>
         BodyState RefetchEarth(JulianDay jd, EphemerisFlags flags);
+
+        /// <summary>Earth center only; excludes topocentric observer offsets.</summary>
+        BodyState RefetchEarthCenter(JulianDay jd, EphemerisFlags flags);
     }
 
     /// <summary>

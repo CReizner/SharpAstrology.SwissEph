@@ -106,18 +106,23 @@ public sealed class BodyService
         BodyState rawBody;
         try
         {
-            rawBody = chosenSource.Compute(body, jdEt, resolvedFlags);
+            // Lunar apparent position needs velocity internally even when
+            // the caller omits Speed (observer aberration / analytical delay).
+            rawBody = chosenSource.Compute(body, jdEt, body == CelestialBody.Moon ? resolvedFlags | EphemerisFlags.Speed : resolvedFlags);
         }
         catch (FileNotFoundException) when (chosenSource.Kind == EphemerisSource.SwissEph && _router.Has(EphemerisSource.Moshier))
         {
             resolvedFlags = (resolvedFlags & ~EphemerisFlags.SwissEph) | EphemerisFlags.MoshierEph;
             (chosenSource, resolvedFlags) = _router.Resolve(resolvedFlags, body, jdEt);
-            rawBody = chosenSource.Compute(body, jdEt, resolvedFlags);
+            // Lunar apparent position needs velocity internally even when
+            // the caller omits Speed (observer aberration / analytical delay).
+            rawBody = chosenSource.Compute(body, jdEt, body == CelestialBody.Moon ? resolvedFlags | EphemerisFlags.Speed : resolvedFlags);
         }
 
         // Earth & Sun bary states for the pipeline. These follow exactly the
         // same source/fallback chain as the body itself.
-        var rawEarthCenter = ResolveAndCompute(CelestialBody.Earth, jdEt, resolvedFlags);
+        var earthFlags = body == CelestialBody.Moon ? resolvedFlags | EphemerisFlags.Speed : resolvedFlags;
+        var rawEarthCenter = ResolveAndCompute(CelestialBody.Earth, jdEt, earthFlags);
         var rawSun = ResolveSunState(jdEt, resolvedFlags, rawEarthCenter);
 
         // Topocentric: fold the geographic offset into "earth" so the
@@ -191,6 +196,11 @@ public sealed class BodyService
         }
 
         public bool HasEarthRefetch => true;
+
+        // Raw geocentric Moon must be lifted with the Earth center, even
+        // when the caller requests a topocentric apparent position.
+        public BodyState RefetchEarthCenter(JulianDay jd, EphemerisFlags flags)
+            => _service.ResolveAndCompute(CelestialBody.Earth, jd, flags & ~EphemerisFlags.Topocentric);
 
         public BodyState RefetchEarth(JulianDay jd, EphemerisFlags flags)
         {
