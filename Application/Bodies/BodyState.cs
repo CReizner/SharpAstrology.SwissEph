@@ -40,7 +40,8 @@ public readonly record struct BodyState(
     Vec3 Velocity,
     double Distance,
     EphemerisSource Source,
-    BodyStateFrame Frame);
+    BodyStateFrame Frame,
+    int DeNumber = 0);
 
 /// <summary>
 /// Identifies the reference frame of a <see cref="BodyState"/>.

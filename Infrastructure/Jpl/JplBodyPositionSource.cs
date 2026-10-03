@@ -123,7 +123,7 @@ internal sealed class JplBodyPositionSource : IBodyPositionSource, IDisposable
             case CelestialBody.Moon:
                 {
                     var (pos, vel) = InterpolateBody(et, JplFileFormat.JplMoon, inSpeed);
-                    return new BodyState(pos, vel, pos.Length, EphemerisSource.Jpl, BodyStateFrame.GeocentricJ2000Equator);
+                    return new BodyState(pos, vel, pos.Length, EphemerisSource.Jpl, BodyStateFrame.GeocentricJ2000Equator, DeNumber);
                 }
             case CelestialBody.Sun:
                 {
@@ -131,7 +131,7 @@ internal sealed class JplBodyPositionSource : IBodyPositionSource, IDisposable
                     // (the C code treats `pvsun` as a separate buffer scaled the
                     // same way). swejpl.c:823-827.
                     var (pos, vel) = InterpolateBody(et, JplFileFormat.JplSun, inSpeed);
-                    return new BodyState(pos, vel, pos.Length, EphemerisSource.Jpl, BodyStateFrame.BarycentricJ2000Equator);
+                    return new BodyState(pos, vel, pos.Length, EphemerisSource.Jpl, BodyStateFrame.BarycentricJ2000Equator, DeNumber);
                 }
             case CelestialBody.Earth:
                 {
@@ -143,7 +143,7 @@ internal sealed class JplBodyPositionSource : IBodyPositionSource, IDisposable
                     var vel = inSpeed
                         ? new Vec3(embV.X - moonV.X * w, embV.Y - moonV.Y * w, embV.Z - moonV.Z * w)
                         : default;
-                    return new BodyState(pos, vel, pos.Length, EphemerisSource.Jpl, BodyStateFrame.BarycentricJ2000Equator);
+                    return new BodyState(pos, vel, pos.Length, EphemerisSource.Jpl, BodyStateFrame.BarycentricJ2000Equator, DeNumber);
                 }
             case CelestialBody.Mercury:
             case CelestialBody.Venus:
@@ -156,7 +156,7 @@ internal sealed class JplBodyPositionSource : IBodyPositionSource, IDisposable
                 {
                     var jplIdx = MapPlanetToJplIndex(body);
                     var (pos, vel) = InterpolateBody(et, jplIdx, inSpeed);
-                    return new BodyState(pos, vel, pos.Length, EphemerisSource.Jpl, BodyStateFrame.BarycentricJ2000Equator);
+                    return new BodyState(pos, vel, pos.Length, EphemerisSource.Jpl, BodyStateFrame.BarycentricJ2000Equator, DeNumber);
                 }
             default:
                 throw new UnsupportedBodyException(body, EphemerisSource.Jpl);

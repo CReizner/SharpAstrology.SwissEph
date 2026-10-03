@@ -111,7 +111,7 @@ internal sealed class SwissEphBodyPositionSource : IBodyPositionSource, IDisposa
     private BodyState ComputeMoonGeocentric(JulianDay jdEt, bool inSpeed)
     {
         var (pos, vel) = ReadFromFile(CelestialBody.Moon, Se1FileFormat.SeiMoon, jdEt, inSpeed);
-        return new BodyState(pos, vel, pos.Length, EphemerisSource.SwissEph, BodyStateFrame.GeocentricJ2000Equator);
+        return new BodyState(pos, vel, pos.Length, EphemerisSource.SwissEph, BodyStateFrame.GeocentricJ2000Equator, GetReaderForBlock(Se1FileFormat.SeiMoon, jdEt).Header.JplDeNumber);
     }
 
     /// <summary>
@@ -125,7 +125,7 @@ internal sealed class SwissEphBodyPositionSource : IBodyPositionSource, IDisposa
         var (baryEmb, baryEmbV) = ReadFromFile(CelestialBody.Sun, Se1FileFormat.SeiEmb, jdEt, inSpeed);
         var pos = baryEmb - helEarth;
         var vel = inSpeed ? (baryEmbV - helEarthV) : default;
-        return new BodyState(pos, vel, pos.Length, EphemerisSource.SwissEph, BodyStateFrame.BarycentricJ2000Equator);
+        return new BodyState(pos, vel, pos.Length, EphemerisSource.SwissEph, BodyStateFrame.BarycentricJ2000Equator, GetReaderForBlock(Se1FileFormat.SeiSunBary, jdEt).Header.JplDeNumber);
     }
 
     /// <summary>
@@ -143,7 +143,7 @@ internal sealed class SwissEphBodyPositionSource : IBodyPositionSource, IDisposa
         {
             vel = new Vec3(baryEmbV.X - moonGeoV.X * w, baryEmbV.Y - moonGeoV.Y * w, baryEmbV.Z - moonGeoV.Z * w);
         }
-        return new BodyState(pos, vel, pos.Length, EphemerisSource.SwissEph, BodyStateFrame.BarycentricJ2000Equator);
+        return new BodyState(pos, vel, pos.Length, EphemerisSource.SwissEph, BodyStateFrame.BarycentricJ2000Equator, GetReaderForBlock(Se1FileFormat.SeiEmb, jdEt).Header.JplDeNumber);
     }
 
     /// <summary>
@@ -174,9 +174,9 @@ internal sealed class SwissEphBodyPositionSource : IBodyPositionSource, IDisposa
                     fileVel.Y + (baryEmbV.Y - helEarthV.Y),
                     fileVel.Z + (baryEmbV.Z - helEarthV.Z))
                 : default;
-            return new BodyState(bary, baryV, bary.Length, EphemerisSource.SwissEph, BodyStateFrame.BarycentricJ2000Equator);
+            return new BodyState(bary, baryV, bary.Length, EphemerisSource.SwissEph, BodyStateFrame.BarycentricJ2000Equator, GetReaderForBlock(SwissEphFileLocator.MapToSeiInternalIndex(body), jdEt).Header.JplDeNumber);
         }
-        return new BodyState(filePos, fileVel, filePos.Length, EphemerisSource.SwissEph, BodyStateFrame.BarycentricJ2000Equator);
+        return new BodyState(filePos, fileVel, filePos.Length, EphemerisSource.SwissEph, BodyStateFrame.BarycentricJ2000Equator, GetReaderForBlock(SwissEphFileLocator.MapToSeiInternalIndex(body), jdEt).Header.JplDeNumber);
     }
 
     private (Vec3 Pos, Vec3 Vel) ReadFromFile(CelestialBody body, int seiBody, JulianDay jdEt, bool inSpeed)

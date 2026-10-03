@@ -340,6 +340,14 @@ internal sealed class CorrectionPipeline
             for (var i = 3; i < 6; i++) xx[i] = 0.0;
         }
 
+        // Swiss C 2.10.03 sweph.c:2755/4051/4227: ICRS -> J2000, before
+        // precession (also for J2000 output). Use the actual selected source's
+        // file header, never the requested source or process-global metadata.
+        // C swi_get_denum explicitly returns 403 for Moshier; no JPL metadata
+        // participates in that analytical-source branch.
+        if (ShouldApplyFrameBias(rawBody.Source, rawBody.DeNumber, flags))
+            CatalogFrameTransforms.IcrsBias(xx, inSpeed, backward: false, model: _models.FrameBias);
+
         // ---- Step 8: precession J2000 → date (sweph.c#L2766-L2773) --------
         // skipped if SEFLG_J2000 set.
         var precessNow = (flags & EphemerisFlags.J2000Equinox) == 0;
@@ -419,7 +427,14 @@ internal sealed class CorrectionPipeline
             inSpeed ? new Vec3(xx[3], xx[4], xx[5]) : default,
             System.Math.Sqrt(xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]),
             rawBody.Source,
-            outFrame);
+            outFrame, rawBody.DeNumber);
+    }
+
+    internal static bool ShouldApplyFrameBias(EphemerisSource source, int fileDeNumber, EphemerisFlags flags)
+    {
+        // C swi_get_denum: Moshier -> 403; unread/zero file DE -> SE_DE_NUMBER (431).
+        var deNumber = source == EphemerisSource.Moshier ? 403 : fileDeNumber > 0 ? fileDeNumber : 431;
+        return (flags & EphemerisFlags.Icrs) == 0 && deNumber >= 403;
     }
 
     /// <summary>

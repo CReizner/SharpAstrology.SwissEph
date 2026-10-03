@@ -534,7 +534,7 @@ public sealed class BodyService
             new Vec3(s[3], s[4], s[5]),
             state.Distance,
             state.Source,
-            state.Frame);
+            state.Frame, state.DeNumber);
     }
 
     private BodyState ResolveSunState(JulianDay jdEt, EphemerisFlags flags, BodyState earth)
@@ -602,7 +602,7 @@ public sealed class BodyService
             inSpeed ? new Vec3(cart[3], cart[4], cart[5]) : default,
             ecliptic.Distance,
             ecliptic.Source,
-            ecliptic.Frame);
+            ecliptic.Frame, ecliptic.DeNumber);
     }
 
     private static BodyState AddVec3(BodyState a, BodyState b) =>
@@ -611,7 +611,7 @@ public sealed class BodyService
             new Vec3(a.Velocity.X + b.Velocity.X, a.Velocity.Y + b.Velocity.Y, a.Velocity.Z + b.Velocity.Z),
             0.0,
             a.Source,
-            a.Frame);
+            a.Frame, a.DeNumber);
 
     /// <summary>
     /// Geographic observer offset in barycentric J2000-equator coordinates
