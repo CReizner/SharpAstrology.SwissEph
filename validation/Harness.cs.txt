@@ -1,0 +1,19 @@
+using System.Text.Json;
+using SharpAstrology.SwissEphemerides;
+using SharpAstrology.SwissEphemerides.Application.Calendar;
+using SharpAstrology.SwissEphemerides.Application.Bodies;
+using SharpAstrology.SwissEphemerides.Domain.Time;
+using var context=new EphemerisContextBuilder().UseSwissEphFiles(args[0]).DisableMoshier().Build();
+var calendar=new CalendarService();
+while(Console.ReadLine() is {} line){
+ using var doc=JsonDocument.Parse(line);var r=doc.RootElement;
+ if(r.TryGetProperty("utc",out var text)){
+  var date=DateTime.Parse(text.GetString()!,null,System.Globalization.DateTimeStyles.AdjustToUniversal|System.Globalization.DateTimeStyles.AssumeUniversal);
+  var jd=calendar.UtcToJulianDay(date);var back=calendar.JulianDayToUtc(jd);
+  Console.WriteLine(JsonSerializer.Serialize(new{ut1=jd.Value,roundtripSeconds=(back-date).TotalSeconds,utcKind=back.Kind.ToString()}));
+ }else{
+  var s=context.Bodies.Compute((CelestialBody)r.GetProperty("body").GetInt32(),new JulianDay(r.GetProperty("tt").GetDouble()),(EphemerisFlags)r.GetProperty("flags").GetInt32());
+  var x=s.Position;var v=s.Velocity;var lon=Math.Atan2(x.Y,x.X)*180/Math.PI;if(lon<0)lon+=360;
+  Console.WriteLine(JsonSerializer.Serialize(new{longitude=lon,speed=(x.X*v.Y-x.Y*v.X)/(x.X*x.X+x.Y*x.Y)*180/Math.PI,vector=new[]{x.X,x.Y,x.Z,v.X,v.Y,v.Z},source=s.Source.ToString()}));
+ }
+}

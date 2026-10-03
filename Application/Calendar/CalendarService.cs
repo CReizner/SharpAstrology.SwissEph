@@ -67,14 +67,28 @@ public sealed class CalendarService
     /// <param name="calendar">Calendar to interpret the date in.</param>
     /// <returns>UT1 Julian Day.</returns>
     public JulianDay UtcToJulianDay(DateTime utc, CalendarSystem calendar = CalendarSystem.Gregorian)
-        => JulianDay.FromUtc(utc, calendar);
+    {
+        if (utc.Kind != DateTimeKind.Utc)
+            throw new ArgumentException("DateTime.Kind must be Utc.", nameof(utc));
+        // swe_utc_to_jd semantics, retaining every fractional DateTime tick.
+        var seconds = utc.Second + (utc.Ticks % TimeSpan.TicksPerSecond) / (double)TimeSpan.TicksPerSecond;
+        return UtcToJulianDayPair(utc.Year, utc.Month, utc.Day, utc.Hour, utc.Minute, seconds, calendar).Ut1;
+    }
 
     /// <summary>
     /// Inverse of <see cref="UtcToJulianDay"/>: a Julian Day back to a
     /// UTC <see cref="DateTime"/>.
     /// </summary>
     public DateTime JulianDayToUtc(JulianDay jd, CalendarSystem calendar = CalendarSystem.Gregorian)
-        => jd.ToUtc(calendar);
+    {
+        var utc = JdUt1ToUtc(jd, calendar);
+        // DateTime cannot represent 23:59:60. Keep that limitation explicit;
+        // callers needing leap-second labels can use JdUt1ToUtc directly.
+        if (utc.Second >= 60)
+            throw new NotSupportedException("Leap-second UTC labels cannot be represented by DateTime; use JdUt1ToUtc.");
+        return new DateTime(utc.Year, utc.Month, utc.Day, utc.Hour, utc.Minute, 0, DateTimeKind.Utc)
+            .AddTicks((long)Math.Round(utc.Second * TimeSpan.TicksPerSecond));
+    }
 
     /// <summary>
     /// Builds a Julian Day from a calendar date plus decimal hour.
