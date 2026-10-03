@@ -253,10 +253,11 @@ public sealed class BodyService
     /// exactly like the C original, so the resulting node honours nutation
     /// (the element math then needs no further correction, per the comment
     /// at sweph.c#L5468-L5472). Other apparent-position corrections
-    /// (aberration, light-time, gravitational deflection) are not layered
-    /// on top, matching the geometric semantics of
-    /// <see cref="Phenomena.NodesAndApsidesService"/> and the
-    /// SEFLG_TRUEPOS golden tests. Heliocentric and barycentric
+    /// (aberration, gravitational deflection) are not layered on top.
+    /// Swiss/JPL apparent samples do include the lunar light-time refetch
+    /// in lunar_osc_elem; TruePosition bypasses it and retains the
+    /// geometric samples used by the SEFLG_TRUEPOS golden tests.
+    /// Heliocentric and barycentric
     /// request bits short-circuit to zero (sweph.c#L860-L864).
     /// </para>
     /// </remarks>
@@ -340,6 +341,16 @@ public sealed class BodyService
         IBodyPositionSource source, JulianDay jd, EphemerisFlags resolvedFlags, bool withNutation)
     {
         var moon = source.Compute(CelestialBody.Moon, jd, resolvedFlags | EphemerisFlags.Speed);
+        // lunar_osc_elem refetches the raw geocentric Moon at emission TT
+        // for Swiss/JPL apparent nodes and apogees. Moshier and TRUEPOS
+        // bypass this step. Rotate both position and velocity at reception
+        // TT below, without the planetary apparent-position pipeline.
+        if (source.Kind != EphemerisSource.Moshier
+            && (resolvedFlags & EphemerisFlags.TruePosition) == 0)
+        {
+            var lightTime = moon.Position.Length * AstronomicalConstants.LightTimeAuPerDay;
+            moon = source.Compute(CelestialBody.Moon, new JulianDay(jd.Value - lightTime), resolvedFlags | EphemerisFlags.Speed);
+        }
         return MoonToEclipticOfDate(moon, jd.Value, withNutation);
     }
 

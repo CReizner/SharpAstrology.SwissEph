@@ -317,19 +317,14 @@ public sealed class SwissEphemerides : IEphemerides
     };
 
     /// <summary>
-    /// Geometric flag set required by the lunar-osculating-elements branch
-    /// of <see cref="BodyService"/> (see
-    /// <see cref="LunarOsculatingElements"/>): no aberration, no
-    /// gravitational deflection, true position. Nutation
-    /// stays enabled so node longitudes refer to the true equinox of date,
-    /// matching the C library's default output (its node path ignores the
-    /// aberration / deflection / true-position bits anyway).
-    /// The moon position underneath comes from the context's preferred source.
-    /// The sidereal bit added by <see cref="NodeGeometryFlags"/> reaches the
-    /// sidereal gate of <see cref="BodyService.Compute"/>, which runs on the
-    /// osculating-elements branch as well.
+    /// Apparent lunar node flags matching the C library's default output.
+    /// No aberration or deflection is applied to osculating points, but
+    /// TRUEPOS must stay clear: lunar_osc_elem uses it to decide whether
+    /// to refetch Swiss/JPL Moon samples at their light-time epoch.
+    /// Nutation and the configured source remain enabled.
     /// </summary>
-    private EphemerisFlags TrueNodeFlags(EphCalculationMode mode) => NodeGeometryFlags(mode);
+    private EphemerisFlags TrueNodeFlags(EphCalculationMode mode) =>
+        NodeGeometryFlags(mode) & ~EphemerisFlags.TruePosition;
 
     /// <summary>
     /// Mean lunar node is currently implemented by the analytical Moshier
