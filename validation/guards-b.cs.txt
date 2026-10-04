@@ -1,0 +1,22 @@
+using SharpAstrology.SwissEphemerides.Application.Bodies;
+using SharpAstrology.SwissEphemerides.Domain.Time;
+using SharpAstrology.SwissEphemerides.Domain.Frames;
+using SharpAstrology.SwissEphemerides.Domain.Mathematics;
+void Check(bool value){if(!value)throw new Exception("Frame bias guard failed");}
+var flags=EphemerisFlags.SwissEph|EphemerisFlags.Speed;
+Check(!CorrectionPipeline.ShouldApplyFrameBias(EphemerisSource.SwissEph,402,flags));
+Check(CorrectionPipeline.ShouldApplyFrameBias(EphemerisSource.SwissEph,403,flags));
+Check(CorrectionPipeline.ShouldApplyFrameBias(EphemerisSource.SwissEph,0,flags));
+Check(!CorrectionPipeline.ShouldApplyFrameBias(EphemerisSource.SwissEph,441,flags|EphemerisFlags.Icrs));
+Check(CorrectionPipeline.ShouldApplyFrameBias(EphemerisSource.Moshier,402,flags));
+var raw=new BodyState(new Vec3(1,.2,.3),new Vec3(.01,.02,.03),1,EphemerisSource.SwissEph,BodyStateFrame.BarycentricJ2000Equator,441);
+var zero=raw with {Position=Vec3.Zero,Velocity=Vec3.Zero};
+var f=flags|EphemerisFlags.TruePosition|EphemerisFlags.Barycentric|EphemerisFlags.Equatorial|EphemerisFlags.J2000Equinox|EphemerisFlags.NoNutation;
+var result=new CorrectionPipeline().Apply(raw,zero,zero,zero,new NoFetch(),CelestialBody.Mercury,JulianDay.J2000,f);
+Span<double> expected=stackalloc double[]{1,.2,.3,.01,.02,.03};CatalogFrameTransforms.IcrsBias(expected,true,false);
+Check(result.Position==new Vec3(expected[0],expected[1],expected[2]));Check(result.Velocity==new Vec3(expected[3],expected[4],expected[5]));
+readonly struct NoFetch:CorrectionPipeline.IRefetchProvider{
+ public bool HasEarthRefetch=>false;
+ public BodyState RefetchBody(CelestialBody b,JulianDay jd,EphemerisFlags f)=>throw new Exception();
+ public BodyState RefetchEarth(JulianDay jd,EphemerisFlags f)=>throw new Exception();
+}

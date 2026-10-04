@@ -1,0 +1,48 @@
+using System.Text.Json;
+using SharpAstrology.SwissEphemerides;
+using SharpAstrology.SwissEphemerides.Application.Bodies;
+using SharpAstrology.SwissEphemerides.Application.Calendar;
+using SharpAstrology.SwissEphemerides.Domain.Constants;
+using SharpAstrology.SwissEphemerides.Domain.Mathematics;
+using SharpAstrology.SwissEphemerides.Domain.Time;
+
+// Source-spy tests verify emission epochs and raw velocity fetching for
+// every speed/nutation/source branch. No production trace hooks required.
+var guardCount=0;
+foreach(var source in new[]{EphemerisSource.SwissEph,EphemerisSource.Jpl,EphemerisSource.Moshier})
+foreach(var truth in new[]{false,true})
+foreach(var speed in new[]{false,true})
+foreach(var nutation in new[]{false,true}) {
+ var fake=new SpySource(source);var bodies=new BodyService(new SourceRouter(new[]{fake}),new CalendarService());
+ var flags=source switch {EphemerisSource.SwissEph=>EphemerisFlags.SwissEph,EphemerisSource.Jpl=>EphemerisFlags.JplEph,_=>EphemerisFlags.MoshierEph};
+ if(truth)flags|=EphemerisFlags.TruePosition;if(speed)flags|=EphemerisFlags.Speed;if(!nutation)flags|=EphemerisFlags.NoNutation;
+ var r=bodies.Compute(CelestialBody.TrueNode,new JulianDay(2457057.7896664813),flags);
+ var samples=speed?3:1;var retard=source!=EphemerisSource.Moshier&&!truth;
+ if(fake.Calls.Count!=samples*(retard?2:1))throw new Exception("Unexpected lunar fetch count");
+ for(var i=0;i<fake.Calls.Count;i++) {
+  var c=fake.Calls[i];if((c.flags&EphemerisFlags.Speed)==0)throw new Exception("Raw lunar velocity missing");
+  if(retard&&i%2==1) {
+   var t=fake.Calls[i-1].jd;var expected=t-SpySource.Position(t).Length*AstronomicalConstants.LightTimeAuPerDay;
+   if(c.jd!=expected)throw new Exception("Incorrect light-time epoch");
+  }
+ }
+ if(!speed&&r.Velocity!=Vec3.Zero)throw new Exception("No-speed API leaked velocity");
+ guardCount++;
+}
+using var ctx=new EphemerisContextBuilder().Build();
+using var adapter=new SharpAstrology.Ephemerides.SwissEphemerides(ctx);
+var method=typeof(SharpAstrology.Ephemerides.SwissEphemerides).GetMethod("TrueNodeFlags",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!;
+foreach(var mode in new[]{SharpAstrology.Enums.EphCalculationMode.Tropic,SharpAstrology.Enums.EphCalculationMode.Sidereal}){
+ var f=(EphemerisFlags)method.Invoke(adapter,new object[]{mode})!;
+ if((f&EphemerisFlags.TruePosition)!=0)throw new Exception("Adapter forced TRUEPOS");
+}
+sealed class SpySource(EphemerisSource kind):IBodyPositionSource {
+ public EphemerisSource Kind=>kind;
+ public List<(double jd,EphemerisFlags flags)> Calls=new();
+ public bool CanProvide(CelestialBody body)=>body==CelestialBody.Moon;
+ public static Vec3 Position(double t)=>new(.002+.0001*(t-2457057.7896664813),.001,.0002);
+ public BodyState Compute(CelestialBody body,JulianDay jd,EphemerisFlags flags) {
+  Calls.Add((jd.Value,flags));var p=Position(jd.Value);
+  return new BodyState(p,new Vec3(.0001,.0002,-.00004),p.Length,Kind,Kind==EphemerisSource.Moshier?BodyStateFrame.GeocentricEclipticOfDate:BodyStateFrame.GeocentricJ2000Equator,441);
+ }
+}

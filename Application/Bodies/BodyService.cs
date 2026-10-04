@@ -106,18 +106,23 @@ public sealed class BodyService
         BodyState rawBody;
         try
         {
-            rawBody = chosenSource.Compute(body, jdEt, resolvedFlags);
+            // Lunar apparent position needs velocity internally even when
+            // the caller omits Speed (observer aberration / analytical delay).
+            rawBody = chosenSource.Compute(body, jdEt, body == CelestialBody.Moon ? resolvedFlags | EphemerisFlags.Speed : resolvedFlags);
         }
         catch (FileNotFoundException) when (chosenSource.Kind == EphemerisSource.SwissEph && _router.Has(EphemerisSource.Moshier))
         {
             resolvedFlags = (resolvedFlags & ~EphemerisFlags.SwissEph) | EphemerisFlags.MoshierEph;
             (chosenSource, resolvedFlags) = _router.Resolve(resolvedFlags, body, jdEt);
-            rawBody = chosenSource.Compute(body, jdEt, resolvedFlags);
+            // Lunar apparent position needs velocity internally even when
+            // the caller omits Speed (observer aberration / analytical delay).
+            rawBody = chosenSource.Compute(body, jdEt, body == CelestialBody.Moon ? resolvedFlags | EphemerisFlags.Speed : resolvedFlags);
         }
 
         // Earth & Sun bary states for the pipeline. These follow exactly the
         // same source/fallback chain as the body itself.
-        var rawEarthCenter = ResolveAndCompute(CelestialBody.Earth, jdEt, resolvedFlags);
+        var earthFlags = body == CelestialBody.Moon ? resolvedFlags | EphemerisFlags.Speed : resolvedFlags;
+        var rawEarthCenter = ResolveAndCompute(CelestialBody.Earth, jdEt, earthFlags);
         var rawSun = ResolveSunState(jdEt, resolvedFlags, rawEarthCenter);
 
         // Topocentric: fold the geographic offset into "earth" so the
@@ -192,6 +197,11 @@ public sealed class BodyService
 
         public bool HasEarthRefetch => true;
 
+        // Raw geocentric Moon must be lifted with the Earth center, even
+        // when the caller requests a topocentric apparent position.
+        public BodyState RefetchEarthCenter(JulianDay jd, EphemerisFlags flags)
+            => _service.ResolveAndCompute(CelestialBody.Earth, jd, flags & ~EphemerisFlags.Topocentric);
+
         public BodyState RefetchEarth(JulianDay jd, EphemerisFlags flags)
         {
             var earthAtT = _service.ResolveAndCompute(CelestialBody.Earth, jd, flags);
@@ -243,10 +253,11 @@ public sealed class BodyService
     /// exactly like the C original, so the resulting node honours nutation
     /// (the element math then needs no further correction, per the comment
     /// at sweph.c#L5468-L5472). Other apparent-position corrections
-    /// (aberration, light-time, gravitational deflection) are not layered
-    /// on top, matching the geometric semantics of
-    /// <see cref="Phenomena.NodesAndApsidesService"/> and the
-    /// SEFLG_TRUEPOS golden tests. Heliocentric and barycentric
+    /// (aberration, gravitational deflection) are not layered on top.
+    /// Swiss/JPL apparent samples do include the lunar light-time refetch
+    /// in lunar_osc_elem; TruePosition bypasses it and retains the
+    /// geometric samples used by the SEFLG_TRUEPOS golden tests.
+    /// Heliocentric and barycentric
     /// request bits short-circuit to zero (sweph.c#L860-L864).
     /// </para>
     /// </remarks>
@@ -330,6 +341,16 @@ public sealed class BodyService
         IBodyPositionSource source, JulianDay jd, EphemerisFlags resolvedFlags, bool withNutation)
     {
         var moon = source.Compute(CelestialBody.Moon, jd, resolvedFlags | EphemerisFlags.Speed);
+        // lunar_osc_elem refetches the raw geocentric Moon at emission TT
+        // for Swiss/JPL apparent nodes and apogees. Moshier and TRUEPOS
+        // bypass this step. Rotate both position and velocity at reception
+        // TT below, without the planetary apparent-position pipeline.
+        if (source.Kind != EphemerisSource.Moshier
+            && (resolvedFlags & EphemerisFlags.TruePosition) == 0)
+        {
+            var lightTime = moon.Position.Length * AstronomicalConstants.LightTimeAuPerDay;
+            moon = source.Compute(CelestialBody.Moon, new JulianDay(jd.Value - lightTime), resolvedFlags | EphemerisFlags.Speed);
+        }
         return MoonToEclipticOfDate(moon, jd.Value, withNutation);
     }
 
@@ -534,7 +555,7 @@ public sealed class BodyService
             new Vec3(s[3], s[4], s[5]),
             state.Distance,
             state.Source,
-            state.Frame);
+            state.Frame, state.DeNumber);
     }
 
     private BodyState ResolveSunState(JulianDay jdEt, EphemerisFlags flags, BodyState earth)
@@ -602,7 +623,7 @@ public sealed class BodyService
             inSpeed ? new Vec3(cart[3], cart[4], cart[5]) : default,
             ecliptic.Distance,
             ecliptic.Source,
-            ecliptic.Frame);
+            ecliptic.Frame, ecliptic.DeNumber);
     }
 
     private static BodyState AddVec3(BodyState a, BodyState b) =>
@@ -611,7 +632,7 @@ public sealed class BodyService
             new Vec3(a.Velocity.X + b.Velocity.X, a.Velocity.Y + b.Velocity.Y, a.Velocity.Z + b.Velocity.Z),
             0.0,
             a.Source,
-            a.Frame);
+            a.Frame, a.DeNumber);
 
     /// <summary>
     /// Geographic observer offset in barycentric J2000-equator coordinates
