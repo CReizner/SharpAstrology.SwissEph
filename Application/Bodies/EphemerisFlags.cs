@@ -35,11 +35,8 @@ public enum EphemerisFlags : int
     /// <summary>SEFLG_NONUT — no nutation.</summary>
     NoNutation = 64,
     /// <summary>
-    /// SEFLG_SPEED3 — legacy 3-position speed estimator. This port has no
-    /// separate low-precision speed implementation, so PlausibilityCheck
-    /// normalises any Speed3 (alone or combined with Speed) to plain
-    /// <see cref="Speed"/> before the pipeline runs. Kept on the enum for
-    /// numeric parity with the C library's iflag bit values.
+    /// SEFLG_SPEED3 — legacy 3-position speed estimator, implemented by BodyService.
+    /// Speed takes precedence when both bits are present.
     /// </summary>
     Speed3 = 128,
     /// <summary>SEFLG_SPEED — high-precision velocity.</summary>

@@ -86,7 +86,7 @@ internal sealed class CorrectionPipeline
         Span<double> xEarth = stackalloc double[6];
         ToJ2000Equator(rawEarthHelioBary, jdEt.Value, xEarth);
 
-        // Geocentric raw frames (Moshier Moon emits GeocentricEclipticOfDate)
+        // Geocentric raw frames (all Moon sources emit GeocentricJ2000Equator)
         // need lifting to barycentric before the standard pipeline runs —
         // app_pos_etc_moon does this at sweph.c#L4115-L4116:
         //   xx[i] += pedp->x[i];   // to solar-system barycentric
@@ -138,7 +138,56 @@ internal sealed class CorrectionPipeline
         var dtsave = 0.0;
         Span<double> xxsp = stackalloc double[3];
         var hasXxsp = false;
-        if (!truePos)
+        var geocentricSun = body == CelestialBody.Sun && !isHelio && !isBary;
+        if (!truePos && geocentricSun)
+        {
+            // app_pos_etc_sun (sweph.c:3952-4037): two accurate retarded
+            // Sun samples, keeping the observer at reception. No planetary
+            // change-of-light-time speed term and no observer acceleration.
+            // Moshier's heliocentric Sun stays at the origin.
+            if (rawBody.Source != EphemerisSource.Moshier)
+            {
+                for (var iteration = 0; iteration < 2; iteration++)
+                {
+                    var dx = xobs[0] - xx[0];
+                    var dy = xobs[1] - xx[1];
+                    var dz = xobs[2] - xx[2];
+                    dtsave = System.Math.Sqrt(dx * dx + dy * dy + dz * dz)
+                        * AstronomicalConstants.LightTimeAuPerDay;
+                    var emission = jdEt - dtsave;
+                    ToJ2000Equator(fetcher.RefetchBody(body, emission, flags), emission.Value, xx);
+                }
+            }
+        }
+        else if (!truePos && body == CelestialBody.Moon)
+        {
+            // app_pos_etc_moon uses one range-based delay and no planetary
+            // change-of-light-time speed correction (sweph.c:4147-4184).
+            Span<double> range = stackalloc double[3];
+            for (var i = 0; i < 3; i++)
+                range[i] = xx0[i] - (isBary ? 0.0 : isHelio ? xSun[i] : xobs[i]);
+            dtsave = System.Math.Sqrt(range[0] * range[0] + range[1] * range[1] + range[2] * range[2])
+                * AstronomicalConstants.LightTimeAuPerDay;
+            if (rawBody.Source == EphemerisSource.Moshier)
+            {
+                // Analytical Moon: retard position linearly, retain velocity.
+                for (var i = 0; i < 3; i++) xx[i] = xx0[i] - dtsave * xx0[i + 3];
+                for (var i = 3; i < 6; i++) xx[i] = xx0[i];
+            }
+            else
+            {
+                var emission = new JulianDay(jdEt.Value - dtsave);
+                ToJ2000Equator(fetcher.RefetchBody(body, emission, flags | EphemerisFlags.Speed), emission.Value, xx);
+                // Lift with Earth CENTER at emission, not Earth at reception
+                // or an observer offset (which would count parallax twice).
+                Span<double> earthAtEmission = stackalloc double[6];
+                ToJ2000Equator(fetcher.RefetchEarthCenter(emission, flags | EphemerisFlags.Speed), emission.Value, earthAtEmission);
+                for (var i = 0; i < 6; i++) xx[i] += earthAtEmission[i];
+            }
+            if (isHelio && rawBody.Source != EphemerisSource.Moshier)
+                for (var i = 0; i < 6; i++) xx[i] -= xSun[i];
+        }
+        else if (!truePos)
         {
             // Number of refinement iterations beyond the initial estimate.
             // Mirrors C: JPL/SwissEph use 1; Moshier uses 0 (sweph.c#L2546-L2551).
@@ -271,11 +320,30 @@ internal sealed class CorrectionPipeline
         // sweph.c#L2748-L2751).
         Span<double> xobs2 = stackalloc double[6];
         var hasXobs2 = false;
-        if (!truePos && inSpeed && fetcher.HasEarthRefetch)
+        if (!truePos && !geocentricSun && inSpeed && fetcher.HasEarthRefetch)
         {
             var tMinusDt = jdEt.Value - dtsave;
-            var earthRefetch = fetcher.RefetchEarth(new JulianDay(tMinusDt), flags);
-            ToJ2000Equator(earthRefetch, tMinusDt, xobs2);
+            if (body == CelestialBody.Moon && rawBody.Source == EphemerisSource.Moshier)
+            {
+                // sweph.c:4179-4199: linear Earth position, unchanged Earth
+                // velocity. Only the geographic observer is recomputed at t-dt.
+                for (var i = 0; i < 3; i++)
+                {
+                    xobs2[i] = xEarthCenter[i] - dtsave * xEarthCenter[i + 3];
+                    xobs2[i + 3] = xEarthCenter[i + 3];
+                }
+                if ((flags & EphemerisFlags.Topocentric) != 0)
+                {
+                    Span<double> offset = stackalloc double[6];
+                    ToJ2000Equator(fetcher.RefetchObserverOffset(new JulianDay(tMinusDt)), tMinusDt, offset);
+                    for (var i = 0; i < 6; i++) xobs2[i] += offset[i];
+                }
+            }
+            else
+            {
+                var earthRefetch = fetcher.RefetchEarth(new JulianDay(tMinusDt), flags);
+                ToJ2000Equator(earthRefetch, tMinusDt, xobs2);
+            }
             hasXobs2 = true;
         }
 
@@ -316,7 +384,7 @@ internal sealed class CorrectionPipeline
             // would need a small bary-Sun refetch which is acceptable to omit
             // at this milestone (see notes/decisions for justification).
             GravitationalDeflection.Apply(
-                xx, earthHelio, earthHelio.Slice(3, 3), inSpeed);
+                xx, earthHelio, earthHelio.Slice(3, 3), inSpeed, xEarth, xSun, dtsave);
         }
 
         // ---- Step 7: annual aberration (sweph.c#L2740-L2752) --------------
@@ -339,6 +407,11 @@ internal sealed class CorrectionPipeline
         {
             for (var i = 3; i < 6; i++) xx[i] = 0.0;
         }
+
+        // ICRS -> J2000 precedes precession, including for J2000 output.
+        // Use the actual source's DE series, including after source fallback.
+        if (ShouldApplyFrameBias(rawBody.Source, rawBody.DeNumber, flags))
+            CatalogFrameTransforms.IcrsBias(xx, inSpeed, backward: false, model: _models.FrameBias);
 
         // ---- Step 8: precession J2000 → date (sweph.c#L2766-L2773) --------
         // skipped if SEFLG_J2000 set.
@@ -406,7 +479,7 @@ internal sealed class CorrectionPipeline
             wantEquatorial
                 ? ((flags & EphemerisFlags.J2000Equinox) != 0
                     ? BodyStateFrame.GeocentricJ2000Equator
-                    : BodyStateFrame.GeocentricJ2000Equator) // equator-of-date — closest match in the existing enum is GeocentricJ2000Equator
+                    : BodyStateFrame.GeocentricEquatorOfDate)
                 : ((flags & EphemerisFlags.J2000Equinox) != 0
                     ? BodyStateFrame.GeocentricJ2000Ecliptic
                     : BodyStateFrame.GeocentricEclipticOfDate);
@@ -419,7 +492,15 @@ internal sealed class CorrectionPipeline
             inSpeed ? new Vec3(xx[3], xx[4], xx[5]) : default,
             System.Math.Sqrt(xx[0] * xx[0] + xx[1] * xx[1] + xx[2] * xx[2]),
             rawBody.Source,
-            outFrame);
+            outFrame) { DeNumber = rawBody.DeNumber };
+    }
+
+    internal static bool ShouldApplyFrameBias(EphemerisSource source, int fileDeNumber, EphemerisFlags flags)
+    {
+        // swi_get_denum (sweph.c:2407): analytical Moshier is DE403;
+        // unspecified file metadata uses SE_DE_NUMBER (431).
+        var deNumber = source == EphemerisSource.Moshier ? 403 : fileDeNumber > 0 ? fileDeNumber : 431;
+        return (flags & EphemerisFlags.Icrs) == 0 && deNumber >= 403;
     }
 
     /// <summary>
@@ -471,6 +552,12 @@ internal sealed class CorrectionPipeline
         /// supplied time, with any topocentric offset already folded in.
         /// </summary>
         BodyState RefetchEarth(JulianDay jd, EphemerisFlags flags);
+
+        /// <summary>Earth center only, without any geographic observer offset.</summary>
+        BodyState RefetchEarthCenter(JulianDay jd, EphemerisFlags flags);
+
+        /// <summary>Geographic observer relative to Earth center, for topocentric calls.</summary>
+        BodyState RefetchObserverOffset(JulianDay jd);
     }
 
     /// <summary>

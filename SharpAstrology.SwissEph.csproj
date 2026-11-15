@@ -14,10 +14,10 @@
     <RootNamespace>SharpAstrology.SwissEphemerides</RootNamespace>
     <AssemblyName>SharpAstrology.SwissEph</AssemblyName>
     <PackageId>SharpAstrology.SwissEph</PackageId>
-    <Version>0.5.1</Version>
+    <Version>0.5.2</Version>
     <Authors>Christian Reizner</Authors>
     <Description>Swiss Ephemeris ported to idiomatic C# (.NET 10). Drop-in successor of SharpAstrology.SwissEph 0.3.0: same SwissEphemeridesService/IEphemerides surface, no native dependencies. Implements SharpAstrology.Base.IEphemerides.</Description>
-    <PackageReleaseNotes>0.5.0: EphType.Jpl now really computes from the JPL kernel through IEphemerides. The adapter used to leave the source unnamed, so the SwissEph default took over and a JPL-configured service silently returned SwissEph or Moshier values. New EphemerisContextBuilder.UsePreferredSource for the same choice at the low level. Bodies a DE kernel never contains, asteroids above all, are served from the .se1 files as in the C library. New SwissEphemeridesService constructor parameter allowMoshierFallback: pass false to turn a missing .se1 file into a FileNotFoundException instead of a silent fall back to Moshier. UnsupportedBodyException now names the source the caller asked for instead of the last one tried. All additions are opt-in, existing behaviour is unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>0.5.2: Correct lunar light time and frame bias, true-node coordinate output, positions without Speed, and planetary velocities. Implement topocentric and Speed3 three-position velocities. Add 2,000 C-reference cases for Swiss files and Moshier.</PackageReleaseNotes>
     <PackageProjectUrl>https://github.com/CReizner/SharpAstrology.SwissEph</PackageProjectUrl>
     <RepositoryUrl>https://github.com/CReizner/SharpAstrology.SwissEph</RepositoryUrl>
     <PackageTags>Astrology;SwissEphemeris;Ephemeris;IEphemerides</PackageTags>
@@ -46,6 +46,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Remove="Tests/**/*.cs" />
     <None Include="LICENSE.AGPL-3.0.txt" Pack="true" PackagePath="\" Condition="Exists('LICENSE.AGPL-3.0.txt')" />
     <None Include="LICENSE.SwissEph.txt" Pack="true" PackagePath="\" Condition="Exists('LICENSE.SwissEph.txt')" />
     <None Include="README.md" Pack="true" PackagePath="\" Condition="Exists('README.md')" />
@@ -53,6 +54,7 @@
     <InternalsVisibleTo Include="SharpAstrology.SwissEphemerides.GoldenTests" />
     <InternalsVisibleTo Include="SharpAstrology.SwissEphemerides.IntegrationTests" />
     <InternalsVisibleTo Include="SharpAstrology.SwissEphemerides.Benchmarks" />
+    <InternalsVisibleTo Include="SharpAstrology.SwissEph.Tests" />
   </ItemGroup>
 
 </Project>

@@ -23,6 +23,12 @@ It attempts to mimic the behavior of the C library swisseph (version 2.10.3).
 dotnet add package SharpAstrology.SwissEph
 ```
 
+## Tests
+
+Run `dotnet test Tests/SharpAstrology.SwissEph.Tests.csproj -c Release` with the .NET 10 SDK or later. The suite includes 2,000 reference cases generated from the original Swiss Ephemeris C library, covering positions and velocities with Swiss files and Moshier.
+
+Set `SWISSEPH_EPHE_PATH` to a directory containing `sepl_18.se1` and `semo_18.se1`, or place them in an `ephe` directory above the test output. These data files are not bundled. The fixtures in `Tests/TestData` record the source and data hashes; the Python scripts in `Tests/tools` regenerate the fixtures or compare revisions against a local C checkout.
+
 ## Simple usage
 ```C#
 using System.Text.Json;

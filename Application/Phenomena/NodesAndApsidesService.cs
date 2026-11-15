@@ -1266,7 +1266,7 @@ public sealed class NodesAndApsidesService
         Span<double> xpPos = stackalloc double[3] { xp[0], xp[1], xp[2] };
         Precession.Apply(xpPos, jdEt.Value, AstronomicalConstants.J2000, _models);
         xp[0] = xpPos[0]; xp[1] = xpPos[1]; xp[2] = xpPos[2];
-        Precession.ApplySpeed(xp, jdEt.Value, AstronomicalConstants.J2000, _models);
+        Precession.ApplySpeed(xp, jdEt.Value, AstronomicalConstants.J2000, _models, backward: true);
 
         // ---- Lift vector and deflection earthHelio (swecl.c#L5474-L5480) ----
         // C reads xsun = pldat[SEI_SUNBARY].x and xear = pldat[SEI_EARTH].x as

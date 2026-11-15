@@ -35,14 +35,18 @@ internal static class GravitationalDeflection
     /// <param name="xyzApparent">In/out — body position, observer-relative, AU. Optionally length-6 with velocity for the speed branch.</param>
     /// <param name="earthHelio">Earth heliocentric position (AU); X/Y/Z in 0..2.</param>
     /// <param name="earthHelioVelocity">Earth heliocentric velocity (AU/day); X/Y/Z in 0..2. Required only for the speed branch.</param>
-    /// <param name="sunBaryRelativeToEarthAtMinusDt">Optional: barycentric Sun position at <c>t - dt</c> minus Earth's barycentric position at <c>t</c>; if not provided we treat earth-helio as the Earth-Sun vector. The C library fills this from cached barycentric vectors when JPL/SwissEph is selected.</param>
+    /// <param name="observerBary">Optional six-component barycentric observer state.</param>
+    /// <param name="sunBary">Optional six-component barycentric Sun state at reception.</param>
+    /// <param name="lightTimeDays">Delay used to linearly retard the Sun for the planet–Sun vector.</param>
     /// <param name="includeSpeedCorrection">Apply finite-difference velocity correction (requires xyzApparent.Length ≥ 6).</param>
     public static void Apply(
         Span<double> xyzApparent,
         ReadOnlySpan<double> earthHelio,
         ReadOnlySpan<double> earthHelioVelocity,
         bool includeSpeedCorrection = false,
-        ReadOnlySpan<double> sunBaryRelativeToEarthAtMinusDt = default)
+        ReadOnlySpan<double> observerBary = default,
+        ReadOnlySpan<double> sunBary = default,
+        double lightTimeDays = 0)
     {
         if (xyzApparent.Length < 3)
             throw new ArgumentException("Vector span must contain at least 3 doubles.", nameof(xyzApparent));
@@ -62,7 +66,9 @@ internal static class GravitationalDeflection
         {
             u[i] = xyzApparent[i];
             e[i] = earthHelio[i];
-            q[i] = xyzApparent[i] + earthHelio[i] - (sunBaryRelativeToEarthAtMinusDt.Length >= 3 ? sunBaryRelativeToEarthAtMinusDt[i] : 0.0);
+            q[i] = observerBary.Length >= 6 && sunBary.Length >= 6
+                ? xyzApparent[i] + observerBary[i] - (sunBary[i] - lightTimeDays * sunBary[i + 3])
+                : xyzApparent[i] + earthHelio[i];
         }
         var ru = System.Math.Sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
         var rq = System.Math.Sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]);
@@ -102,8 +108,9 @@ internal static class GravitationalDeflection
         {
             u2[i] = xyzApparent[i] - dtsp * xyzApparent[i + 3];
             e2[i] = earthHelio[i] - dtsp * earthHelioVelocity[i];
-            q2[i] = u2[i] + earthHelio[i] - (sunBaryRelativeToEarthAtMinusDt.Length >= 3 ? sunBaryRelativeToEarthAtMinusDt[i] : 0.0)
-                    - dtsp * earthHelioVelocity[i];
+            q2[i] = (observerBary.Length >= 6 && sunBary.Length >= 6
+                ? u2[i] + observerBary[i] - (sunBary[i] - lightTimeDays * sunBary[i + 3])
+                : u2[i] + earthHelio[i]) - dtsp * earthHelioVelocity[i];
         }
         var ru2 = System.Math.Sqrt(u2[0] * u2[0] + u2[1] * u2[1] + u2[2] * u2[2]);
         var rq2 = System.Math.Sqrt(q2[0] * q2[0] + q2[1] * q2[1] + q2[2] * q2[2]);
@@ -128,7 +135,9 @@ internal static class GravitationalDeflection
         for (var i = 0; i < 3; i++)
         {
             var dx1 = xx2[i] - xyzApparent[i];
-            var dx2 = xx3[i] - (xyzApparent[i] - dtsp * xyzApparent[i + 3]);
+            // Preserve C's normalize/denormalize order. Rounding in this
+            // subtraction is amplified by the very short speed interval.
+            var dx2 = xx3[i] - u2[i] * ru2;
             dx1 -= dx2;
             xyzApparent[i + 3] += dx1 / dtsp;
         }

@@ -8,7 +8,7 @@
 //   Str                        — STR                     (sweph.h:663)
 //   TimeScale                  — TIMESCALE               (swemplan.c:67)
 //   Mods3600                   — modulo 1 296 000 arcsec (swemplan.c:69)
-//   EarthMoonMassRatio         — DE431                   (sweph.h:267)
+//   EarthMoonMassRatio         — active AA 2006 value     (sweph.h:265)
 //   SpeedIntervalDays          — speed-step              (swemplan.c:299)
 //   MoshierStartJd / MoshierEndJd — sweph.h:219 / sweph.h:220
 //   Freqs                      — freqs[] (Simon et al. 1994)  (swemplan.c:88-100)
@@ -34,7 +34,7 @@ internal static class MoshierPlanetTheory
     internal const double TimeScale = 3_652_500.0;
 
     /// <summary>Earth–Moon mass ratio (DE431).</summary>
-    internal const double EarthMoonMassRatio = 81.30056907419062;
+    internal const double EarthMoonMassRatio = AstronomicalConstants.EarthMoonMassRatio;
 
     /// <summary>Speed step in TT days, used by the dispatcher's finite-difference velocity.</summary>
     internal const double SpeedIntervalDays = 0.0001;

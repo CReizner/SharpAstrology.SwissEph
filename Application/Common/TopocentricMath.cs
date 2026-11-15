@@ -91,7 +91,7 @@ internal static class TopocentricMath
         posSpan[0] = xobs[0]; posSpan[1] = xobs[1]; posSpan[2] = xobs[2];
         Precession.Apply(posSpan, jdEt.Value, AstronomicalConstants.J2000, models);
         xobs[0] = posSpan[0]; xobs[1] = posSpan[1]; xobs[2] = posSpan[2];
-        Precession.ApplySpeed(xobs, jdEt.Value, AstronomicalConstants.J2000, models);
+        Precession.ApplySpeed(xobs, jdEt.Value, AstronomicalConstants.J2000, models, backward: true);
 
         return new BodyState(
             new Vec3(xobs[0], xobs[1], xobs[2]),

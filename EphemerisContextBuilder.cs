@@ -282,7 +282,7 @@ public sealed class EphemerisContextBuilder
         }
         if (_includeMoshier)
         {
-            sources.Add(new MoshierBodyPositionSource());
+            sources.Add(new MoshierBodyPositionSource(_models));
         }
 
         if (sources.Count == 0)

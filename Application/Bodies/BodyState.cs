@@ -40,7 +40,15 @@ public readonly record struct BodyState(
     Vec3 Velocity,
     double Distance,
     EphemerisSource Source,
-    BodyStateFrame Frame);
+    BodyStateFrame Frame)
+{
+    /// <summary>
+    /// DE series of the source file, used internally for frame-bias selection.
+    /// Zero means unspecified. Kept outside the positional parameters so the
+    /// public five-argument constructor and five-output Deconstruct stay intact.
+    /// </summary>
+    internal int DeNumber { get; init; }
+}
 
 /// <summary>
 /// Identifies the reference frame of a <see cref="BodyState"/>.
@@ -51,13 +59,13 @@ public enum BodyStateFrame
     HeliocentricJ2000Ecliptic = 0,
     /// <summary>Geocentric, J2000 ecliptic, cartesian (AU, AU/day).</summary>
     GeocentricJ2000Ecliptic = 1,
-    /// <summary>Geocentric, ecliptic-of-date, cartesian (AU, AU/day). Moshier moon raw output.</summary>
+    /// <summary>Geocentric, ecliptic-of-date, cartesian (AU, AU/day). Derived lunar points.</summary>
     GeocentricEclipticOfDate = 2,
     /// <summary>Heliocentric, J2000 equator (= ICRS axes), cartesian (AU, AU/day). SwissEph planet raw output.</summary>
     HeliocentricJ2000Equator = 3,
     /// <summary>Barycentric, J2000 equator, cartesian (AU, AU/day). SwissEph EMB raw output.</summary>
     BarycentricJ2000Equator = 4,
-    /// <summary>Geocentric, J2000 equator, cartesian (AU, AU/day). SwissEph Moon raw output.</summary>
+    /// <summary>Geocentric, J2000 equator, cartesian (AU, AU/day). Moon raw output.</summary>
     GeocentricJ2000Equator = 5,
     /// <summary>Planetocentric (centered on a non-Earth body), ecliptic-of-date, cartesian (AU, AU/day).</summary>
     PlanetocentricEclipticOfDate = 6,
@@ -67,4 +75,6 @@ public enum BodyStateFrame
     PlanetocentricEquatorOfDate = 8,
     /// <summary>Planetocentric (centered on a non-Earth body), J2000 equator, cartesian (AU, AU/day).</summary>
     PlanetocentricJ2000Equator = 9,
+    /// <summary>Geocentric, equator-of-date, cartesian (AU, AU/day).</summary>
+    GeocentricEquatorOfDate = 10,
 }

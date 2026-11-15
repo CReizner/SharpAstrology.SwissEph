@@ -491,7 +491,8 @@ internal static class Precession
     /// <param name="jdSourceTt">Source-frame TT epoch.</param>
     /// <param name="jdTargetTt">Target-frame TT epoch. One of the two epochs MUST be J2000.</param>
     /// <param name="overrides">Model selectors.</param>
-    public static void ApplySpeed(Span<double> state, double jdSourceTt, double jdTargetTt, AstronomicalModelOverrides? overrides = null)
+    /// <param name="backward">Selects date → J2000 when both epochs equal J2000; otherwise the epochs determine direction.</param>
+    public static void ApplySpeed(Span<double> state, double jdSourceTt, double jdTargetTt, AstronomicalModelOverrides? overrides = null, bool backward = false)
     {
         if (state.Length < 6)
             throw new ArgumentException("State span must contain at least 6 doubles.", nameof(state));
@@ -512,14 +513,10 @@ internal static class Precession
         // The body's epoch is whichever side is non-J2000.
         double tBody, fac;
         Span<double> oeSc = stackalloc double[2]; // [seps, ceps]
-        // jdSourceTt == J2000 must be checked FIRST: when both endpoints
-        // happen to equal J2000 (e.g. body / fixstar requests evaluated at
-        // exactly the J2000 epoch), the user-supplied call shape carries
-        // the intended direction. The fixstar and body pipelines always
-        // call ApplySpeed(J2000, tjd) for J2000_TO_J — fac = +1, oe = oec
-        // at the body's epoch — so we must not silently flip the sign by
-        // matching the J_TO_J2000 branch on a degenerate equality.
-        if (jdSourceTt == J2000)
+        // At exactly J2000 both dates coincide, but the moving date frame
+        // still has a precession rate. Planet/star output defaults to the
+        // forward direction; node and observer conversions specify backward.
+        if (jdSourceTt == J2000 && !(backward && jdTargetTt == J2000))
         {
             // J2000_TO_J: target is body epoch.
             tBody = jdTargetTt;

@@ -27,6 +27,13 @@ namespace SharpAstrology.SwissEphemerides.Infrastructure.Moshier;
 /// </summary>
 internal sealed class MoshierBodyPositionSource : IBodyPositionSource
 {
+    private readonly AstronomicalModelOverrides _models;
+
+    public MoshierBodyPositionSource(AstronomicalModelOverrides? models = null)
+    {
+        _models = models ?? AstronomicalModelOverrides.Default;
+    }
+
     /// <inheritdoc />
     public EphemerisSource Kind => EphemerisSource.Moshier;
 
@@ -63,16 +70,16 @@ internal sealed class MoshierBodyPositionSource : IBodyPositionSource
         if (body == CelestialBody.Moon)
         {
             EnsureMoonInRange(jd);
-            // Moon raw output is GEOCENTRIC ecliptic of date (not J2000).
+            // swi_moshmoon returns geocentric J2000 equatorial samples.
             if (inSpeed)
             {
-                var (p, v) = MoshierMoonTheory.ComputeCartesianOfDateWithSpeed(jd);
-                return new BodyState(p, v, p.Length, EphemerisSource.Moshier, BodyStateFrame.GeocentricEclipticOfDate);
+                var (p, v) = MoshierMoonTheory.ComputeCartesianJ2000EquatorWithSpeed(jd, _models);
+                return new BodyState(p, v, p.Length, EphemerisSource.Moshier, BodyStateFrame.GeocentricJ2000Equator);
             }
             else
             {
-                var p = MoshierMoonTheory.ComputeCartesianOfDate(jd);
-                return new BodyState(p, default, p.Length, EphemerisSource.Moshier, BodyStateFrame.GeocentricEclipticOfDate);
+                var p = MoshierMoonTheory.ComputeCartesianJ2000Equator(jd, Precession.MeanObliquity(jd, _models), _models);
+                return new BodyState(p, default, p.Length, EphemerisSource.Moshier, BodyStateFrame.GeocentricJ2000Equator);
             }
         }
 
@@ -105,15 +112,22 @@ internal sealed class MoshierBodyPositionSource : IBodyPositionSource
         }
 
         var idx = MapPlanetIndex(body);
+        var eps2000 = Precession.MeanObliquity(AstronomicalConstants.J2000);
+        var seps2000 = System.Math.Sin(eps2000);
+        var ceps2000 = System.Math.Cos(eps2000);
+        var position = RotateEclipticToEquator(MoshierPlanetTheory.ComputeCartesianJ2000(idx, jd), seps2000, ceps2000);
         if (inSpeed)
         {
-            var (p, v) = MoshierPlanetTheory.ComputeCartesianJ2000WithSpeed(idx, jd);
-            return new BodyState(p, v, p.Length, EphemerisSource.Moshier, BodyStateFrame.HeliocentricJ2000Ecliptic);
+            // swi_moshplan rotates both positions BEFORE differencing.
+            // Rotating a previously differenced vector changes rounding,
+            // which is amplified again by light-time and SPEED3 sampling.
+            var previous = RotateEclipticToEquator(MoshierPlanetTheory.ComputeCartesianJ2000(idx, jd - MoshierPlanetTheory.SpeedIntervalDays), seps2000, ceps2000);
+            var velocity = (position - previous) / MoshierPlanetTheory.SpeedIntervalDays;
+            return new BodyState(position, velocity, position.Length, EphemerisSource.Moshier, BodyStateFrame.HeliocentricJ2000Equator);
         }
         else
         {
-            var p = MoshierPlanetTheory.ComputeCartesianJ2000(idx, jd);
-            return new BodyState(p, default, p.Length, EphemerisSource.Moshier, BodyStateFrame.HeliocentricJ2000Ecliptic);
+            return new BodyState(position, default, position.Length, EphemerisSource.Moshier, BodyStateFrame.HeliocentricJ2000Equator);
         }
     }
 
@@ -135,6 +149,20 @@ internal sealed class MoshierBodyPositionSource : IBodyPositionSource
         _ => throw new System.ArgumentException($"Body {body} has no Moshier planet table.", nameof(body)),
     };
 
+    public BodyState ComputeAtEpoch(CelestialBody body, JulianDay sample, JulianDay evaluation, EphemerisFlags flags)
+    {
+        var eps = Precession.MeanObliquity(evaluation.Value, _models);
+        if (body == CelestialBody.Earth)
+        {
+            EnsurePlanetInRange(sample.Value);
+            return ComputeEarth(sample.Value, (flags & (EphemerisFlags.Speed | EphemerisFlags.Speed3)) != 0, eps);
+        }
+        if (body != CelestialBody.Moon) return Compute(body, sample, flags);
+        EnsureMoonInRange(sample.Value);
+        var (p, v) = MoshierMoonTheory.ComputeCartesianJ2000EquatorWithSpeed(sample.Value, _models, eps);
+        return new BodyState(p, v, p.Length, EphemerisSource.Moshier, BodyStateFrame.GeocentricJ2000Equator);
+    }
+
     /// <summary>
     /// Compute Earth heliocentric J2000-equator state:
     /// 1. Pull EMB heliocentric in J2000 ecliptic polar.
@@ -142,7 +170,7 @@ internal sealed class MoshierBodyPositionSource : IBodyPositionSource
     /// 3. Rotate ecliptic-J2000 → equator-J2000 with mean obliquity at J2000.
     /// 4. Subtract the Moon-of-date contribution (precessed to equator-J2000).
     /// </summary>
-    private static BodyState ComputeEarth(double jdEt, bool wantVelocity)
+    private static BodyState ComputeEarth(double jdEt, bool wantVelocity, double? centralObliquity = null)
     {
         // Mean obliquity at J2000 (model-default).
         var eps2000 = Precession.MeanObliquity(AstronomicalConstants.J2000);
@@ -154,12 +182,13 @@ internal sealed class MoshierBodyPositionSource : IBodyPositionSource
         // 2 + 3. Rotate ecl-J2000 → equ-J2000 via swi_coortrf2(-seps2000, ceps2000).
         var pEarth = RotateEclipticToEquator(pEmb, seps2000, ceps2000);
         // 4. Subtract embofs_mosh (Moon-of-date precessed to J2000 equator).
-        var moonJ2000Equator = EmbofsMosh(jdEt);
-        var weight = 1.0 / (MoshierPlanetTheory.EarthMoonMassRatio + 1.0);
+        var evaluationObliquity = centralObliquity ?? Precession.MeanObliquity(jdEt);
+        var moonJ2000Equator = EmbofsMosh(jdEt, evaluationObliquity);
+        var massRatio = MoshierPlanetTheory.EarthMoonMassRatio + 1.0;
         pEarth = new Vec3(
-            pEarth.X - moonJ2000Equator.X * weight,
-            pEarth.Y - moonJ2000Equator.Y * weight,
-            pEarth.Z - moonJ2000Equator.Z * weight);
+            pEarth.X - moonJ2000Equator.X / massRatio,
+            pEarth.Y - moonJ2000Equator.Y / massRatio,
+            pEarth.Z - moonJ2000Equator.Z / massRatio);
 
         Vec3 v = default;
         if (wantVelocity)
@@ -167,11 +196,11 @@ internal sealed class MoshierBodyPositionSource : IBodyPositionSource
             var dt = MoshierPlanetTheory.SpeedIntervalDays;
             var pEmb2 = MoshierPlanetTheory.ComputeCartesianJ2000(2, jdEt - dt);
             var pEarth2 = RotateEclipticToEquator(pEmb2, seps2000, ceps2000);
-            var moonJ2000Equator2 = EmbofsMosh(jdEt - dt);
+            var moonJ2000Equator2 = EmbofsMosh(jdEt - dt, evaluationObliquity);
             pEarth2 = new Vec3(
-                pEarth2.X - moonJ2000Equator2.X * weight,
-                pEarth2.Y - moonJ2000Equator2.Y * weight,
-                pEarth2.Z - moonJ2000Equator2.Z * weight);
+                pEarth2.X - moonJ2000Equator2.X / massRatio,
+                pEarth2.Y - moonJ2000Equator2.Y / massRatio,
+                pEarth2.Z - moonJ2000Equator2.Z / massRatio);
             v = (pEarth - pEarth2) / dt;
         }
         return new BodyState(pEarth, v, pEarth.Length, EphemerisSource.Moshier, BodyStateFrame.HeliocentricJ2000Equator);
@@ -200,7 +229,7 @@ internal sealed class MoshierBodyPositionSource : IBodyPositionSource
     /// itself) but completely sufficient for the EMB→Earth offset (a 1/82
     /// reduction of the Moon vector). Constants are kept as in the C source.
     /// </remarks>
-    private static Vec3 EmbofsMosh(double tjd)
+    private static Vec3 EmbofsMosh(double tjd, double evaluationObliquity)
     {
         var t = (tjd - AstronomicalConstants.J1900) / 36525.0;
         // Mean anomaly of moon (MP), arcseconds → degrees fold-back via swe_degnorm.
@@ -266,11 +295,9 @@ internal sealed class MoshierBodyPositionSource : IBodyPositionSource
         var y0 = dist * coslat * System.Math.Sin(L);
         var z0 = dist * System.Math.Sin(B);
 
-        // Rotate ecliptic-of-date → equator-of-date with TRUE obliquity is
-        // what the C library does (`swed.oec.seps`); the C `swed.oec` is the
-        // mean obliquity at body epoch (set via calc_epsilon, not via
-        // nutation). So we use the model-default mean obliquity.
-        var epsBody = Precession.MeanObliquity(tjd);
+        // embofs_mosh uses swed.oec: the central evaluation epoch's mean
+        // obliquity, including for speed and retarded-time samples.
+        var epsBody = evaluationObliquity;
         var seps = System.Math.Sin(epsBody);
         var ceps = System.Math.Cos(epsBody);
         var v = RotateEclipticToEquator(new Vec3(x0, y0, z0), seps, ceps);

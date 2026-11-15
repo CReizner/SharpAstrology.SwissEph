@@ -55,6 +55,34 @@ public sealed class BodyService
     /// </param>
     public BodyState Compute(CelestialBody body, JulianDay jdEt, EphemerisFlags flags, ObserverLocation? observer = null)
     {
+        // swe_calc chooses three-position speed before plaus_iflag
+        // adds NoAberration for TruePosition (sweph.c:403-410, 480-505).
+        var speed = (flags & EphemerisFlags.Speed) != 0;
+        var sampledSpeed = (!speed && (flags & EphemerisFlags.Speed3) != 0)
+                || (speed && (flags & EphemerisFlags.Topocentric) != 0
+                    && (flags & EphemerisFlags.NoAberration) == 0);
+        if (!sampledSpeed)
+            return ComputeSingle(body, jdEt, flags, observer);
+
+        // sweph.c:480-497 uses the Moshier interval for nodes/apogees
+        // even with file ephemerides, to remain valid after source fallback.
+        var step = body switch
+        {
+            CelestialBody.Moon => 0.00005, // MOON_SPEED_INTV
+            CelestialBody.TrueNode or CelestialBody.OsculatingApogee => 0.1, // NODE_CALC_INTV_MOSH
+            _ => 0.0001, // PLAN_SPEED_INTV
+        };
+        var minus = ComputeSingle(body, jdEt - step, flags, observer);
+        var plus = ComputeSingle(body, jdEt + step, flags, observer);
+        var center = ComputeSingle(body, jdEt, flags, observer);
+        // calc_speed's parabolic estimator, applied to Cartesian output.
+        var b = (plus.Position - minus.Position) / 2.0;
+        var a = (plus.Position + minus.Position) / 2.0 - center.Position;
+        return center with { Velocity = (a * 2.0 + b) / step };
+    }
+
+    private BodyState ComputeSingle(CelestialBody body, JulianDay jdEt, EphemerisFlags flags, ObserverLocation? observer)
+    {
         var normalised = PlausibilityCheck.Normalize(flags, observer.HasValue);
 
         // Sun has neither heliocentric nor geocentric meaning; return zero
@@ -86,7 +114,10 @@ public sealed class BodyService
         // the ayanamsha taken off afterwards.
         if (body == CelestialBody.TrueNode || body == CelestialBody.OsculatingApogee)
         {
-            return ApplySiderealIfRequested(ComputeLunarOsculatingPoint(body, jdEt, normalised), jdEt, normalised);
+            // lunar_osc_elem gives sidereal projection precedence over J2000.
+            var projectionFlags = (normalised & EphemerisFlags.Sidereal) != 0
+                ? normalised & ~EphemerisFlags.J2000Equinox : normalised;
+            return ApplySiderealIfRequested(ComputeLunarOsculatingPoint(body, jdEt, normalised), jdEt, projectionFlags);
         }
         if (body == CelestialBody.MeanNode || body == CelestialBody.MeanApogee)
         {
@@ -103,22 +134,27 @@ public sealed class BodyService
         // (mirroring main_planet's NOT_AVAILABLE → moshier_planet path,
         // sweph.c#L1626-L1635).
         var (chosenSource, resolvedFlags) = _router.Resolve(normalised, body, jdEt);
+        // Light-time iteration uses the body's velocity; aberration uses
+        // the observer's velocity even for position-only requests
+        // (sweph.c:2593-2595, 2740-2741). Keep full source states internally;
+        // the pipeline uses resolvedFlags to suppress velocity in the output.
+        const EphemerisFlags internalSpeed = EphemerisFlags.Speed;
         BodyState rawBody;
         try
         {
-            rawBody = chosenSource.Compute(body, jdEt, resolvedFlags);
+            rawBody = chosenSource.Compute(body, jdEt, resolvedFlags | internalSpeed);
         }
         catch (FileNotFoundException) when (chosenSource.Kind == EphemerisSource.SwissEph && _router.Has(EphemerisSource.Moshier))
         {
             resolvedFlags = (resolvedFlags & ~EphemerisFlags.SwissEph) | EphemerisFlags.MoshierEph;
             (chosenSource, resolvedFlags) = _router.Resolve(resolvedFlags, body, jdEt);
-            rawBody = chosenSource.Compute(body, jdEt, resolvedFlags);
+            rawBody = chosenSource.Compute(body, jdEt, resolvedFlags | internalSpeed);
         }
 
         // Earth & Sun bary states for the pipeline. These follow exactly the
         // same source/fallback chain as the body itself.
-        var rawEarthCenter = ResolveAndCompute(CelestialBody.Earth, jdEt, resolvedFlags);
-        var rawSun = ResolveSunState(jdEt, resolvedFlags, rawEarthCenter);
+        var rawEarthCenter = ResolveAndCompute(CelestialBody.Earth, jdEt, resolvedFlags | internalSpeed);
+        var rawSun = ResolveSunState(jdEt, resolvedFlags | internalSpeed, rawEarthCenter);
 
         // Topocentric: fold the geographic offset into "earth" so the
         // pipeline's xobs already includes it. This mirrors sweph.c#L2536:
@@ -133,7 +169,7 @@ public sealed class BodyService
             rawObserver = AddVec3(rawEarthCenter, topoOffset);
         }
 
-        var fetcher = new Refetcher(this, observer);
+        var fetcher = new Refetcher(this, observer, jdEt);
         var apparent = _pipeline.Apply(rawBody, rawObserver, rawEarthCenter, rawSun, in fetcher, body, jdEt, resolvedFlags);
 
         return ApplySiderealIfRequested(apparent, jdEt, resolvedFlags);
@@ -177,24 +213,32 @@ public sealed class BodyService
     {
         private readonly BodyService _service;
         private readonly ObserverLocation? _observer;
+        private readonly JulianDay _evaluation;
 
-        public Refetcher(BodyService service, ObserverLocation? observer)
+        public Refetcher(BodyService service, ObserverLocation? observer, JulianDay evaluation)
         {
             _service = service;
             _observer = observer;
+            _evaluation = evaluation;
         }
 
         public BodyState RefetchBody(CelestialBody body, JulianDay jd, EphemerisFlags flags)
         {
             var (source, resolvedFlags) = _service._router.Resolve(flags, body, jd);
-            return source.Compute(body, jd, resolvedFlags);
+            return source.ComputeAtEpoch(body, jd, _evaluation, resolvedFlags);
         }
 
         public bool HasEarthRefetch => true;
 
+        public BodyState RefetchEarthCenter(JulianDay jd, EphemerisFlags flags)
+            => _service.ResolveAndCompute(CelestialBody.Earth, jd, flags & ~EphemerisFlags.Topocentric, _evaluation);
+
+        public BodyState RefetchObserverOffset(JulianDay jd)
+            => _service.ComputeTopocentricOffsetJ2000Equator(jd, _observer!.Value);
+
         public BodyState RefetchEarth(JulianDay jd, EphemerisFlags flags)
         {
-            var earthAtT = _service.ResolveAndCompute(CelestialBody.Earth, jd, flags);
+            var earthAtT = _service.ResolveAndCompute(CelestialBody.Earth, jd, flags, _evaluation);
             if ((flags & EphemerisFlags.Topocentric) != 0 && _observer.HasValue)
             {
                 var topo = _service.ComputeTopocentricOffsetJ2000Equator(jd, _observer.Value);
@@ -214,10 +258,10 @@ public sealed class BodyService
         return Compute(body, new JulianDay(jdUt.Value + dt), flags, observer);
     }
 
-    private BodyState ResolveAndCompute(CelestialBody body, JulianDay jdEt, EphemerisFlags flags)
+    private BodyState ResolveAndCompute(CelestialBody body, JulianDay jdEt, EphemerisFlags flags, JulianDay? evaluation = null)
     {
         var (source, f) = _router.Resolve(flags, body, jdEt);
-        return source.Compute(body, jdEt, f);
+        return evaluation.HasValue ? source.ComputeAtEpoch(body, jdEt, evaluation.Value, f) : source.Compute(body, jdEt, f);
     }
 
     /// <summary>
@@ -232,8 +276,7 @@ public sealed class BodyService
     /// <remarks>
     /// <para>
     /// The orbital-element math runs in geocentric ecliptic-of-date
-    /// cartesian. The Moshier moon source emits the mean ecliptic natively;
-    /// the SwissEph and JPL moon sources emit geocentric J2000-equator
+    /// cartesian. All three moon sources emit geocentric J2000-equator
     /// cartesian, which <see cref="MoonToEclipticOfDate"/> rotates into
     /// ecliptic-of-date via ICRS bias, J2000 → date precession and a
     /// mean-obliquity equator → ecliptic rotation — mirroring
@@ -243,10 +286,10 @@ public sealed class BodyService
     /// exactly like the C original, so the resulting node honours nutation
     /// (the element math then needs no further correction, per the comment
     /// at sweph.c#L5468-L5472). Other apparent-position corrections
-    /// (aberration, light-time, gravitational deflection) are not layered
-    /// on top, matching the geometric semantics of
-    /// <see cref="Phenomena.NodesAndApsidesService"/> and the
-    /// SEFLG_TRUEPOS golden tests. Heliocentric and barycentric
+    /// (aberration, gravitational deflection) are not layered on top.
+    /// Swiss/JPL apparent samples include the lunar light-time refetch
+    /// from lunar_osc_elem; TruePosition retains geometric samples.
+    /// Heliocentric and barycentric
     /// request bits short-circuit to zero (sweph.c#L860-L864).
     /// </para>
     /// </remarks>
@@ -270,12 +313,12 @@ public sealed class BodyService
         // Fetch moon (pos+vel) at three epochs and rotate each into
         // geocentric ecliptic-of-date (true ecliptic unless NoNutation is
         // set) for the orbital-element math.
-        var centerSample = FetchMoonInEclipticOfDate(source, jdEt, resolvedFlags, withNutation);
+        var centerSample = FetchMoonInEclipticOfDate(source, jdEt, jdEt, resolvedFlags, withNutation);
         (Vec3, Vec3) minusSample = default, plusSample = default;
         if (includeSpeed)
         {
-            minusSample = FetchMoonInEclipticOfDate(source, new JulianDay(jdEt.Value - step), resolvedFlags, withNutation);
-            plusSample = FetchMoonInEclipticOfDate(source, new JulianDay(jdEt.Value + step), resolvedFlags, withNutation);
+            minusSample = FetchMoonInEclipticOfDate(source, jdEt - step, jdEt, resolvedFlags, withNutation);
+            plusSample = FetchMoonInEclipticOfDate(source, jdEt + step, jdEt, resolvedFlags, withNutation);
         }
 
         var result = LunarOsculatingElements.Compute(
@@ -289,12 +332,39 @@ public sealed class BodyService
             ? (result.NodePosition, result.NodeVelocity)
             : (result.ApogeePosition, result.ApogeeVelocity);
 
-        return new BodyState(
-            pos,
-            vel,
-            pos.Length,
-            source.Kind,
-            BodyStateFrame.GeocentricEclipticOfDate);
+        var frame = BodyStateFrame.GeocentricEclipticOfDate;
+        var equatorial = (normalisedFlags & EphemerisFlags.Equatorial) != 0;
+        var j2000 = (normalisedFlags & EphemerisFlags.J2000Equinox) != 0
+            && (normalisedFlags & EphemerisFlags.Sidereal) == 0;
+        if (equatorial || j2000)
+        {
+            // lunar_osc_elem, sweph.c:5494-5576: derive equatorial output
+            // from the ecliptic-of-date elements, then precess to J2000
+            // if requested. The node is still defined on the date's ecliptic.
+            Span<double> state = stackalloc double[6] { pos.X, pos.Y, pos.Z, vel.X, vel.Y, vel.Z };
+            var eps = Precession.MeanObliquity(jdEt.Value, _models);
+            if (withNutation) eps += Nutation.Compute(jdEt.Value, _models).DeltaEpsilonRad;
+            FrameTransform.EclipticToEquatorial(state[..3], eps);
+            FrameTransform.EclipticToEquatorial(state[3..], eps);
+            frame = BodyStateFrame.GeocentricEquatorOfDate;
+            if (j2000)
+            {
+                Precession.Apply(state[..3], jdEt.Value, AstronomicalConstants.J2000, _models);
+                if (includeSpeed)
+                    Precession.ApplySpeed(state, jdEt.Value, AstronomicalConstants.J2000, _models, backward: true);
+                frame = BodyStateFrame.GeocentricJ2000Equator;
+                if (!equatorial)
+                {
+                    var eps2000 = Precession.MeanObliquity(AstronomicalConstants.J2000, _models);
+                    FrameTransform.EquatorialToEcliptic(state[..3], eps2000);
+                    FrameTransform.EquatorialToEcliptic(state[3..], eps2000);
+                    frame = BodyStateFrame.GeocentricJ2000Ecliptic;
+                }
+            }
+            pos = new Vec3(state[0], state[1], state[2]);
+            vel = new Vec3(state[3], state[4], state[5]);
+        }
+        return new BodyState(pos, vel, pos.Length, source.Kind, frame);
     }
 
     /// <summary>
@@ -327,10 +397,26 @@ public sealed class BodyService
     /// — the frame the <c>lunar_osc_elem</c> math expects.
     /// </summary>
     private (Vec3 Position, Vec3 Velocity) FetchMoonInEclipticOfDate(
-        IBodyPositionSource source, JulianDay jd, EphemerisFlags resolvedFlags, bool withNutation)
+        IBodyPositionSource source, JulianDay jd, JulianDay evaluation, EphemerisFlags resolvedFlags, bool withNutation)
     {
-        var moon = source.Compute(CelestialBody.Moon, jd, resolvedFlags | EphemerisFlags.Speed);
-        return MoonToEclipticOfDate(moon, jd.Value, withNutation);
+        var moon = source.ComputeAtEpoch(CelestialBody.Moon, jd, evaluation, resolvedFlags | EphemerisFlags.Speed);
+        // lunar_osc_elem (sweph.c:5267-5275, 5315-5319) refetches the
+        // geocentric Moon at emission TT for apparent Swiss/JPL nodes and
+        // apogees. Moshier and TRUEPOS use the original sample. The frame
+        // rotation below still uses reception TT, including for velocity.
+        if (source.Kind != EphemerisSource.Moshier
+            && (resolvedFlags & EphemerisFlags.TruePosition) == 0)
+        {
+            var lightTime = moon.Position.Length * AstronomicalConstants.LightTimeAuPerDay;
+            moon = source.Compute(CelestialBody.Moon, jd - lightTime, resolvedFlags | EphemerisFlags.Speed);
+        }
+        // swi_plan_for_osc_elem reuses nutv at t - NUT_SPEED_INTV.
+        // That matrix was built with the central epoch's obliquity by
+        // swi_check_nutation, unlike the ecliptic rotation of this sample.
+        double? nutationObliquity = withNutation && (resolvedFlags & EphemerisFlags.Speed) != 0
+            && jd.Value == evaluation.Value - 0.0001
+                ? Precession.MeanObliquity(evaluation.Value, _models) : null;
+        return MoonToEclipticOfDate(moon, jd.Value, withNutation, resolvedFlags, nutationObliquity);
     }
 
     /// <summary>
@@ -342,13 +428,9 @@ public sealed class BodyService
     /// <paramref name="withNutation"/> is set, the nutation matrix of the
     /// sample epoch (rotation only on the speed vector too), then
     /// equator-of-date → ecliptic-of-date with mean obliquity, and finally
-    /// the Δε rotation into the true ecliptic. The Moshier moon source
-    /// already emits the mean ecliptic-of-date (it bypasses the
-    /// J2000-equator round trip the C library runs in
-    /// <c>ecldat_equ2000</c>), so that branch only needs the
-    /// mean → true ecliptic lift when nutation is requested.
+    /// the Δε rotation into the true ecliptic.
     /// </summary>
-    private (Vec3 Position, Vec3 Velocity) MoonToEclipticOfDate(BodyState moon, double jdTt, bool withNutation)
+    private (Vec3 Position, Vec3 Velocity) MoonToEclipticOfDate(BodyState moon, double jdTt, bool withNutation, EphemerisFlags flags, double? nutationObliquity)
     {
         if (moon.Frame == BodyStateFrame.GeocentricEclipticOfDate)
         {
@@ -365,7 +447,7 @@ public sealed class BodyService
             var eps = Precession.MeanObliquity(jdTt, _models);
             FrameTransform.EclipticToEquatorial(mpos, eps);
             FrameTransform.EclipticToEquatorial(mvel, eps);
-            NutateEquatorOfDateSample(mpos, mvel, jdTt, eps);
+            NutateEquatorOfDateSample(mpos, mvel, jdTt, eps, nutationObliquity);
             return (new Vec3(mpos[0], mpos[1], mpos[2]), new Vec3(mvel[0], mvel[1], mvel[2]));
         }
         if (moon.Frame == BodyStateFrame.GeocentricJ2000Equator)
@@ -373,7 +455,8 @@ public sealed class BodyService
             Span<double> state = stackalloc double[6];
             state[0] = moon.Position.X; state[1] = moon.Position.Y; state[2] = moon.Position.Z;
             state[3] = moon.Velocity.X; state[4] = moon.Velocity.Y; state[5] = moon.Velocity.Z;
-            CatalogFrameTransforms.IcrsBias(state, includeSpeed: true, backward: false, _models.FrameBias);
+            if ((flags & EphemerisFlags.Icrs) == 0)
+                CatalogFrameTransforms.IcrsBias(state, includeSpeed: true, backward: false, _models.FrameBias);
             Span<double> pos = stackalloc double[3] { state[0], state[1], state[2] };
             Span<double> vel = stackalloc double[3] { state[3], state[4], state[5] };
             Precession.Apply(pos, AstronomicalConstants.J2000, jdTt, _models);
@@ -381,7 +464,7 @@ public sealed class BodyService
             var meanEps = Precession.MeanObliquity(jdTt, _models);
             if (withNutation)
             {
-                NutateEquatorOfDateSample(pos, vel, jdTt, meanEps);
+                NutateEquatorOfDateSample(pos, vel, jdTt, meanEps, nutationObliquity);
             }
             else
             {
@@ -402,11 +485,11 @@ public sealed class BodyService
     /// vector), mean-obliquity equator → ecliptic, then the Δε rotation
     /// into the true ecliptic-and-equinox of date.
     /// </summary>
-    private void NutateEquatorOfDateSample(Span<double> pos, Span<double> vel, double jdTt, double meanEps)
+    private void NutateEquatorOfDateSample(Span<double> pos, Span<double> vel, double jdTt, double meanEps, double? nutationObliquity)
     {
         var nut = Nutation.Compute(jdTt, _models);
-        Nutation.Apply(pos, nut, meanEps);
-        Nutation.Apply(vel, nut, meanEps);
+        Nutation.Apply(pos, nut, nutationObliquity ?? meanEps);
+        Nutation.Apply(vel, nut, nutationObliquity ?? meanEps);
         FrameTransform.EquatorialToEcliptic(pos, meanEps);
         FrameTransform.EquatorialToEcliptic(vel, meanEps);
         FrameTransform.EquatorialToEcliptic(pos, nut.DeltaEpsilonRad);
@@ -534,7 +617,7 @@ public sealed class BodyService
             new Vec3(s[3], s[4], s[5]),
             state.Distance,
             state.Source,
-            state.Frame);
+            state.Frame) { DeNumber = state.DeNumber };
     }
 
     private BodyState ResolveSunState(JulianDay jdEt, EphemerisFlags flags, BodyState earth)
@@ -602,7 +685,7 @@ public sealed class BodyService
             inSpeed ? new Vec3(cart[3], cart[4], cart[5]) : default,
             ecliptic.Distance,
             ecliptic.Source,
-            ecliptic.Frame);
+            ecliptic.Frame) { DeNumber = ecliptic.DeNumber };
     }
 
     private static BodyState AddVec3(BodyState a, BodyState b) =>
@@ -611,7 +694,7 @@ public sealed class BodyService
             new Vec3(a.Velocity.X + b.Velocity.X, a.Velocity.Y + b.Velocity.Y, a.Velocity.Z + b.Velocity.Z),
             0.0,
             a.Source,
-            a.Frame);
+            a.Frame) { DeNumber = a.DeNumber };
 
     /// <summary>
     /// Geographic observer offset in barycentric J2000-equator coordinates

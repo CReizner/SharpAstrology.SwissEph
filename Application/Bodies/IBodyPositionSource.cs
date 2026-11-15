@@ -55,4 +55,12 @@ internal interface IBodyPositionSource
     /// range.
     /// </exception>
     BodyState Compute(CelestialBody body, JulianDay jdEt, EphemerisFlags flags);
+
+    /// <summary>
+    /// Sample at a displaced epoch. Analytical sources may
+    /// need the central evaluation epoch's obliquity for all samples,
+    /// matching the C library's cached swed.oec without mutable global state.
+    /// </summary>
+    BodyState ComputeAtEpoch(CelestialBody body, JulianDay sample, JulianDay evaluation, EphemerisFlags flags)
+        => Compute(body, sample, flags);
 }

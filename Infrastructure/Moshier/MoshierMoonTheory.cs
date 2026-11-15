@@ -19,6 +19,7 @@
 
 using System;
 using SharpAstrology.SwissEphemerides.Domain.Constants;
+using SharpAstrology.SwissEphemerides.Domain.Frames;
 using SharpAstrology.SwissEphemerides.Domain.Mathematics;
 
 namespace SharpAstrology.SwissEphemerides.Infrastructure.Moshier;
@@ -151,13 +152,30 @@ internal static class MoshierMoonTheory
     }
 
     /// <summary>
-    /// Position + 3-point finite-difference velocity, both ecliptic-of-date cartesian.
+    /// Position in the J2000 equator, matching ecldat_equ2000.
+    /// The C routine uses the evaluation epoch's cached obliquity for all
+    /// three speed samples, but precesses each sample at its own epoch.
     /// </summary>
-    internal static (Vec3 Position, Vec3 Velocity) ComputeCartesianOfDateWithSpeed(double jdEt)
+    internal static Vec3 ComputeCartesianJ2000Equator(double jdEt, double evaluationObliquity, AstronomicalModelOverrides models)
     {
         var p = ComputeCartesianOfDate(jdEt);
-        var p1 = ComputeCartesianOfDate(jdEt + SpeedIntervalDays);
-        var p2 = ComputeCartesianOfDate(jdEt - SpeedIntervalDays);
+        Span<double> position = stackalloc double[3] { p.X, p.Y, p.Z };
+        FrameTransform.EclipticToEquatorial(position, evaluationObliquity);
+        Precession.Apply(position, jdEt, AstronomicalConstants.J2000, models);
+        return new Vec3(position[0], position[1], position[2]);
+    }
+
+    /// <summary>
+    /// Position and velocity in a common, fixed J2000 equator frame.
+    /// Transform before differencing, as in swi_moshmoon (swemmoon.c:910-927);
+    /// differencing in the moving ecliptic of date adds a spurious frame rate.
+    /// </summary>
+    internal static (Vec3 Position, Vec3 Velocity) ComputeCartesianJ2000EquatorWithSpeed(double jdEt, AstronomicalModelOverrides models, double? evaluationObliquity = null)
+    {
+        var eps = evaluationObliquity ?? Precession.MeanObliquity(jdEt, models);
+        var p = ComputeCartesianJ2000Equator(jdEt, eps, models);
+        var p1 = ComputeCartesianJ2000Equator(jdEt + SpeedIntervalDays, eps, models);
+        var p2 = ComputeCartesianJ2000Equator(jdEt - SpeedIntervalDays, eps, models);
         // 3-point parabolic estimator from swemmoon.c:925-927.
         var bx = (p1.X - p2.X) * 0.5;
         var by = (p1.Y - p2.Y) * 0.5;

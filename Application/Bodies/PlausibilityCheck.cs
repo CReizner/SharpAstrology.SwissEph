@@ -71,14 +71,9 @@ internal static class PlausibilityCheck
         // True position: no aberration, no deflection.
         if ((flags & EphemerisFlags.TruePosition) != 0)
             flags |= EphemerisFlags.NoAberration | EphemerisFlags.NoGravDeflection;
-        // SEFLG_SPEED3 is collapsed into SEFLG_SPEED. The legacy 3-position
-        // estimator is not separately implemented in this port — every raw
-        // source already returns high-precision velocity unconditionally —
-        // so a standalone Speed3 must be promoted to Speed before the
-        // pipeline runs, otherwise CorrectionPipeline / PlanetocentricService /
-        // FixedStarService (all of which check Speed only) would silently
-        // drop the velocity components. Any Speed3 — alone or combined with
-        // Speed — therefore normalises to Speed here.
+        // BodyService handles the three-position estimator outside
+        // this single-sample pipeline. Promote Speed3 to Speed here so the
+        // correction pipeline and other services receive velocity components.
         if ((flags & EphemerisFlags.Speed3) != 0)
             flags = (flags & ~EphemerisFlags.Speed3) | EphemerisFlags.Speed;
 
